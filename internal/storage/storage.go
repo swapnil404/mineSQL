@@ -257,7 +257,7 @@ func (s *Storage) SeqScan(ctx context.Context, table *TableMeta, txid int64) (<-
 				return
 			}
 
-			for _, d := range data {
+			for i, d := range data {
 				if len(d) == 0 {
 					continue
 				}
@@ -273,6 +273,9 @@ func (s *Storage) SeqScan(ctx context.Context, table *TableMeta, txid int64) (<-
 					continue
 				}
 				if isVisible(row, txid) {
+					row["_x"] = positions[i].X
+					row["_y"] = positions[i].Y
+					row["_z"] = positions[i].Z
 					ch <- row
 				}
 			}

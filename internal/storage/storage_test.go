@@ -122,8 +122,11 @@ func TestSeqScan(t *testing.T) {
 	}
 
 	var rows []Row
-	for row := range ch {
-		rows = append(rows, row)
+	for result := range ch {
+		if result.Err != nil {
+			t.Fatalf("SeqScan error: %v", result.Err)
+		}
+		rows = append(rows, result.Row)
 	}
 
 	if len(rows) != 2 {
@@ -162,8 +165,11 @@ func TestSeqScanMVCC(t *testing.T) {
 	}
 
 	var rows []Row
-	for row := range ch {
-		rows = append(rows, row)
+	for result := range ch {
+		if result.Err != nil {
+			t.Fatalf("SeqScan error: %v", result.Err)
+		}
+		rows = append(rows, result.Row)
 	}
 
 	if len(rows) != 1 {
@@ -246,10 +252,12 @@ func TestSlotToWorld(t *testing.T) {
 	}
 }
 
-func collectRows(ch <-chan Row) []Row {
+func collectRows(ch <-chan ScanResult) []Row {
 	var rows []Row
 	for r := range ch {
-		rows = append(rows, r)
+		if r.Err == nil {
+			rows = append(rows, r.Row)
+		}
 	}
 	return rows
 }

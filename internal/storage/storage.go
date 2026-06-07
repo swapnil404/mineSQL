@@ -19,6 +19,11 @@ const (
 
 type Row map[string]interface{}
 
+type ScanResult struct {
+	Row Row
+	Err error
+}
+
 type ColumnDef struct {
 	Name    string
 	Ordinal int
@@ -212,12 +217,12 @@ func (s *Storage) InsertRow(ctx context.Context, table *TableMeta, values map[st
 	return hal.BlockPos{X: wx, Y: table.YLevel, Z: wz}, nil
 }
 
-func (s *Storage) SeqScan(ctx context.Context, table *TableMeta, txid int64) (<-chan Row, error) {
+func (s *Storage) SeqScan(ctx context.Context, table *TableMeta, txid int64) (<-chan ScanResult, error) {
 	s.mu.Lock()
 	maxSlot := s.nextSlot[table.ID]
 	s.mu.Unlock()
 
-	ch := make(chan Row, 100)
+	ch := make(chan ScanResult, 100)
 
 	go func() {
 		defer close(ch)
@@ -238,6 +243,7 @@ func (s *Storage) SeqScan(ctx context.Context, table *TableMeta, txid int64) (<-
 			chunkZ := 0
 
 			if err := s.hal.ForceLoadChunk(ctx, chunkX, chunkZ); err != nil {
+				ch <- ScanResult{Err: fmt.Errorf("storage: forceload chunk (%d,%d): %w", chunkX, chunkZ, err)}
 				return
 			}
 
@@ -254,6 +260,7 @@ func (s *Storage) SeqScan(ctx context.Context, table *TableMeta, txid int64) (<-
 
 			data, err := s.hal.BatchRead(ctx, positions)
 			if err != nil {
+				ch <- ScanResult{Err: fmt.Errorf("storage: batch read chunk (%d,%d) at y=%d: %w", chunkX, chunkZ, table.YLevel, err)}
 				return
 			}
 
@@ -276,7 +283,7 @@ func (s *Storage) SeqScan(ctx context.Context, table *TableMeta, txid int64) (<-
 					row["_x"] = positions[i].X
 					row["_y"] = positions[i].Y
 					row["_z"] = positions[i].Z
-					ch <- row
+					ch <- ScanResult{Row: row}
 				}
 			}
 		}

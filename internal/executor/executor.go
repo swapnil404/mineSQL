@@ -74,9 +74,17 @@ func (e *Executor) executeInsert(ctx context.Context, stmt *parser.Statement, tx
 	}
 
 	values := make(map[string]interface{})
-	for i, colName := range ins.Columns {
-		if i < len(ins.Values) {
-			values[colName] = ins.Values[i]
+	if len(ins.Columns) == 0 {
+		for i, col := range meta.Columns {
+			if i < len(ins.Values) {
+				values[col.Name] = ins.Values[i]
+			}
+		}
+	} else {
+		for i, colName := range ins.Columns {
+			if i < len(ins.Values) {
+				values[colName] = ins.Values[i]
+			}
 		}
 	}
 
@@ -107,7 +115,11 @@ func (e *Executor) executeSelect(ctx context.Context, stmt *parser.Statement, tx
 	}
 
 	var rows [][]interface{}
-	for row := range ch {
+	for result := range ch {
+		if result.Err != nil {
+			return nil, fmt.Errorf("executor: %w", result.Err)
+		}
+		row := result.Row
 		if !evaluateWhere(row, sel.Where, colMap) {
 			continue
 		}
@@ -147,7 +159,11 @@ func (e *Executor) executeDelete(ctx context.Context, stmt *parser.Statement, tx
 	}
 
 	count := 0
-	for row := range ch {
+	for result := range ch {
+		if result.Err != nil {
+			return nil, fmt.Errorf("executor: %w", result.Err)
+		}
+		row := result.Row
 		if !evaluateWhere(row, del.Where, colMap) {
 			continue
 		}

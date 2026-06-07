@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/swapnil404/minesql/internal/hal/mock"
@@ -199,5 +200,38 @@ func TestWhereOperators(t *testing.T) {
 		if len(result.Rows) != tt.expected {
 			t.Errorf("%s: expected %d rows, got %d", tt.cond, tt.expected, len(result.Rows))
 		}
+	}
+}
+
+func TestInsertNoColumnList(t *testing.T) {
+	ctx := context.Background()
+	ex := newTestExecutor(t)
+
+	ex.Execute(ctx, parseSQL(t, "CREATE TABLE users (id INT, username TEXT, score INT)"), 1)
+	ex.Execute(ctx, parseSQL(t, "INSERT INTO users VALUES (1, 'swapnil', 100)"), 5)
+
+	result, err := ex.Execute(ctx, parseSQL(t, "SELECT * FROM users"), 10)
+	if err != nil {
+		t.Fatalf("SELECT: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(result.Rows))
+	}
+	if result.Tag != "SELECT 1" {
+		t.Errorf("expected 'SELECT 1', got %q", result.Tag)
+	}
+
+	row := result.Rows[0]
+	if len(row) != 3 {
+		t.Fatalf("expected 3 columns, got %d", len(row))
+	}
+	if fmt.Sprint(row[0]) != "1" {
+		t.Errorf("expected id=1, got %v", row[0])
+	}
+	if fmt.Sprint(row[1]) != "swapnil" {
+		t.Errorf("expected username='swapnil', got %v", row[1])
+	}
+	if fmt.Sprint(row[2]) != "100" {
+		t.Errorf("expected score=100, got %v", row[2])
 	}
 }

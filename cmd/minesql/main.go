@@ -36,15 +36,36 @@ func main() {
 
 	exec := executor.NewExecutor(store)
 
-	port := os.Getenv("MINESQL_PORT")
-	if port == "" {
-		port = "5433"
+	pgPort := os.Getenv("MINESQL_PORT")
+	if pgPort == "" {
+		pgPort = "5433"
 	}
-	addr := ":" + port
 
-	srv := wire.NewServer(addr, exec)
-	log.Printf("mineSQL wire server listening on %s", addr)
-	if err := srv.ListenAndServe(ctx); err != nil {
-		log.Fatalf("server error: %v", err)
+	chatPort := os.Getenv("MINESQL_CHAT_PORT")
+	if chatPort == "" {
+		chatPort = "5456"
+	}
+
+	pgSrv := wire.NewServer(":"+pgPort, exec)
+	chatSrv := wire.NewChatServer(":"+chatPort, exec)
+
+	errCh := make(chan error, 2)
+
+	go func() {
+		log.Printf("mineSQL wire server listening on :%s", pgPort)
+		errCh <- pgSrv.ListenAndServe(ctx)
+	}()
+
+	go func() {
+		log.Printf("mineSQL chat server listening on :%s", chatPort)
+		errCh <- chatSrv.ListenAndServe(ctx)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			log.Fatalf("server error: %v", err)
+		}
+	case <-ctx.Done():
 	}
 }

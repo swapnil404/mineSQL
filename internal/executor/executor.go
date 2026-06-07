@@ -11,9 +11,10 @@ import (
 )
 
 type Result struct {
-	Columns []string
-	Rows    [][]interface{}
-	Tag     string
+	Columns     []string
+	ColumnTypes []string
+	Rows        [][]interface{}
+	Tag         string
 }
 
 type Executor struct {
@@ -120,9 +121,10 @@ func (e *Executor) executeSelect(ctx context.Context, stmt *parser.Statement, tx
 	}
 
 	return &Result{
-		Columns: columnNames(outCols),
-		Rows:    rows,
-		Tag:     fmt.Sprintf("SELECT %d", len(rows)),
+		Columns:     columnNames(outCols),
+		ColumnTypes: columnTypes(outCols),
+		Rows:        rows,
+		Tag:         fmt.Sprintf("SELECT %d", len(rows)),
 	}, nil
 }
 
@@ -187,6 +189,14 @@ func resolveOutputColumns(requested []string, defs []storage.ColumnDef) []storag
 		}
 	}
 	return out
+}
+
+func columnTypes(cols []storage.ColumnDef) []string {
+	types := make([]string, len(cols))
+	for i, c := range cols {
+		types[i] = c.Type
+	}
+	return types
 }
 
 func columnNames(cols []storage.ColumnDef) []string {

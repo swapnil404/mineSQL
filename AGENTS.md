@@ -9,7 +9,6 @@ This file helps coding agents (Claude, Cursor, Codex, etc.) understand the mineS
 mineSQL is a Postgres-wire-compatible relational database engine written in Go. Its storage backend is a live Minecraft world — every row is a barrel block, every chunk is a page, every Y level is a table. It implements real database internals: WAL, MVCC, a query executor, and a SQL parser.
 
 Full technical spec (authoritative): [`docs/spec.md`](./docs/spec.md)
-Architecture prose explanation: [`docs/architecture.md`](./docs/architecture.md)
 
 **When in doubt about any decision — build order, wire protocol messages, WAL invariants, row encoding format, plugin protocol opcodes — the spec wins.**
 

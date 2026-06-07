@@ -65,6 +65,19 @@ func (s *Storage) BatchRead(ctx context.Context, positions []hal.BlockPos) ([][]
 	return results, nil
 }
 
+func (s *Storage) IsChunkLoaded(ctx context.Context, chunkX, chunkZ int) (bool, error) {
+	return true, nil
+}
+
+func (s *Storage) BatchWrite(ctx context.Context, writes []hal.BlockWrite) error {
+	for _, w := range writes {
+		if err := s.WriteBlock(ctx, w.Pos.X, w.Pos.Y, w.Pos.Z, w.Data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Storage) ForceLoadChunk(ctx context.Context, chunkX, chunkZ int) error {
 	return nil
 }

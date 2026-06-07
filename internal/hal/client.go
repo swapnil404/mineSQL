@@ -11,14 +11,16 @@ import (
 )
 
 const (
-	opWrite     byte = 0x01
-	opRead      byte = 0x02
-	opBatchRead byte = 0x03
-	opForceLoad byte = 0x04
-	opAck       byte = 0x10
-	opData      byte = 0x11
-	opBatchData byte = 0x12
-	opError     byte = 0xFF
+	opWrite       byte = 0x01
+	opRead        byte = 0x02
+	opBatchRead   byte = 0x03
+	opForceLoad   byte = 0x04
+	opIsChunkLoad byte = 0x05
+	opBatchWrite  byte = 0x06
+	opAck         byte = 0x10
+	opData        byte = 0x11
+	opBatchData   byte = 0x12
+	opError       byte = 0xFF
 )
 
 const (
@@ -31,11 +33,18 @@ type BlockPos struct {
 	X, Y, Z int
 }
 
+type BlockWrite struct {
+	Pos  BlockPos
+	Data []byte
+}
+
 type Storage interface {
 	ReadBlock(ctx context.Context, x, y, z int) ([]byte, error)
 	WriteBlock(ctx context.Context, x, y, z int, data []byte) error
 	BatchRead(ctx context.Context, positions []BlockPos) ([][]byte, error)
+	BatchWrite(ctx context.Context, writes []BlockWrite) error
 	ForceLoadChunk(ctx context.Context, chunkX, chunkZ int) error
+	IsChunkLoaded(ctx context.Context, chunkX, chunkZ int) (bool, error)
 }
 
 type Client struct {
@@ -154,6 +163,86 @@ func (c *Client) BatchRead(ctx context.Context, positions []BlockPos) ([][]byte,
 		return nil, fmt.Errorf("plugin error: %s", parseErrorMessage(data))
 	default:
 		return nil, fmt.Errorf("hal: unexpected opcode 0x%02x for BATCH_READ", op)
+	}
+}
+
+func (c *Client) IsChunkLoaded(ctx context.Context, chunkX, chunkZ int) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := c.ensureConn(ctx); err != nil {
+		return false, err
+	}
+
+	payload := encodeInt32s(int32(chunkX), int32(chunkZ))
+	if err := c.send(ctx, opIsChunkLoad, payload); err != nil {
+		return false, err
+	}
+
+	op, data, err := c.recv(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	switch op {
+	case opData:
+		if len(data) < 1 {
+			return false, fmt.Errorf("hal: short IS_CHUNK_LOADED response")
+		}
+		return data[0] == 0x01, nil
+	case opError:
+		return false, fmt.Errorf("plugin error: %s", parseErrorMessage(data))
+	default:
+		return false, fmt.Errorf("hal: unexpected opcode 0x%02x for IS_CHUNK_LOADED", op)
+	}
+}
+
+func (c *Client) BatchWrite(ctx context.Context, writes []BlockWrite) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := c.ensureConn(ctx); err != nil {
+		return err
+	}
+
+	if len(writes) == 0 {
+		return nil
+	}
+
+	totalPayload := 4
+	for _, w := range writes {
+		totalPayload += 12 + 4 + len(w.Data)
+	}
+	payload := make([]byte, totalPayload)
+	binary.BigEndian.PutUint32(payload[0:4], uint32(len(writes)))
+	off := 4
+	for _, w := range writes {
+		putInt32(payload[off:off+4], int32(w.Pos.X))
+		putInt32(payload[off+4:off+8], int32(w.Pos.Y))
+		putInt32(payload[off+8:off+12], int32(w.Pos.Z))
+		off += 12
+		binary.BigEndian.PutUint32(payload[off:off+4], uint32(len(w.Data)))
+		off += 4
+		copy(payload[off:], w.Data)
+		off += len(w.Data)
+	}
+
+	if err := c.send(ctx, opBatchWrite, payload); err != nil {
+		return err
+	}
+
+	op, data, err := c.recv(ctx)
+	if err != nil {
+		return err
+	}
+
+	switch op {
+	case opAck:
+		return nil
+	case opError:
+		return fmt.Errorf("plugin error: %s", parseErrorMessage(data))
+	default:
+		return fmt.Errorf("hal: unexpected opcode 0x%02x for BATCH_WRITE", op)
 	}
 }
 

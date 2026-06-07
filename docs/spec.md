@@ -24,6 +24,7 @@ This document is the authoritative record of every architectural decision made f
 16. [Docker Setup](#16-docker-setup)
 17. [v1 Scope](#17-v1-scope)
 18. [v2 Scope](#18-v2-scope)
+19. [Minecraft Chat Interface](#19-minecraft-chat-interface)
 
 ---
 
@@ -347,6 +348,8 @@ Before any read or write in a new chunk, `ForceLoadChunk` must be called. The HA
 | 0x02 | READ | client → plugin |
 | 0x03 | BATCH_READ | client → plugin |
 | 0x04 | FORCE_LOAD | client → plugin |
+| 0x05 | IS_CHUNK_LOADED | client → plugin |
+| 0x06 | BATCH_WRITE | client → plugin |
 | 0x10 | ACK | plugin → client |
 | 0x11 | DATA | plugin → client |
 | 0x12 | BATCH_DATA | plugin → client |
@@ -413,6 +416,29 @@ per entry:
 ```
 
 Entries are returned in the same order as the BATCH_READ request positions.
+
+### IS_CHUNK_LOADED (0x05)
+
+```
+[4] chunkX (int32)
+[4] chunkZ (int32)
+```
+
+Response: `DATA` with 1 byte payload — `0x01` if the chunk is loaded, `0x00` if not.
+
+### BATCH_WRITE (0x06)
+
+```
+[4] count (uint32)
+per entry:
+  [4] x (int32)
+  [4] y (int32)
+  [4] z (int32)
+  [4] data length (uint32)
+  [N] data (UTF-8 JSON string)
+```
+
+Response: `ACK`
 
 ### ERROR (0xFF)
 
@@ -663,3 +689,85 @@ Post-v1, in rough priority order:
 - **TOAST** — large values split across multiple blocks, reassembled on read
 - **Authentication** — basic username/password in startup message
 - **Web dashboard** — live query stats, active transactions, buffer pool visualization
+
+---
+
+## 19. Minecraft Chat Interface
+
+### Overview
+
+The Minecraft Chat Interface allows players to execute SQL queries by typing `/sql <query>` in the Minecraft chat. The plugin captures this command, opens a connection to the engine's query endpoint, executes the SQL, and returns formatted results to the player.
+
+### Architecture
+
+```
+Player types /sql SELECT * FROM players
+    → Plugin captures command
+    → Plugin opens TCP connection to engine on port 5456
+    → Engine parses SQL, executes, returns results
+    → Plugin formats results as colored chat components
+    → Plugin sends formatted response to player
+```
+
+### Protocol
+
+**Port**: 5456
+**Direction**: plugin → engine (opposite of the HAL binary protocol on 25576)
+**Transport**: TCP, line-delimited text
+
+1. Plugin connects to `localhost:5456`
+2. Plugin sends the SQL query as a single line (UTF-8, `\n` terminated)
+3. Engine executes the query
+4. Engine responds with results as JSON:
+
+```json
+{
+  "columns": ["name", "kills"],
+  "rows": [
+    ["swapnil", "42"],
+    ["steve", "7"]
+  ],
+  "row_count": 2,
+  "truncated": false
+}
+```
+
+5. If an error occurs, the engine responds with:
+
+```json
+{
+  "error": "syntax error at or near \"SELEC\""
+}
+```
+
+6. Plugin closes the connection after receiving the response.
+
+### Result Rendering
+
+The plugin formats results as colored Minecraft chat components:
+
+- **Header row**: column names in gold (`§6`), separated by ` | `
+- **Separator line**: dashes in gray (`§7`)
+- **Data rows**: alternating green (`§a`) and white (`§f`) per row
+- **Truncation message**: if more than 8 rows, show first 8 rows then "§7... N more rows"
+- **Row count footer**: gray text showing row count
+- **Error messages**: displayed in red (`§c`)
+
+Example output in chat:
+
+```
+§6name           | kills
+§7-----------------------------
+§asteve          | 7
+§fswapnil        | 42
+§aherobrine      | 999
+
+§72 rows returned
+```
+
+### v1 Limitations
+
+- Single query per `/sql` command (no multi-statement)
+- Results limited to 8 rows displayed in chat
+- No query history or tab completion
+- No result pagination

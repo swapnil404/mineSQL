@@ -22,17 +22,13 @@ minesql=# SELECT * FROM players WHERE kills > 10;
 (1 row)
 ```
 
-Somewhere in the Minecraft world, a barrel block at coordinates `(32, 64, 15)` now holds:
-
-```json
-{"xmin": 1, "xmax": null, "name": "swapnil", "kills": 42}
-```
+Somewhere in the Minecraft world, a strip of banner blocks at coordinates (32, 128, 15) encodes that row as heraldic pattern layers. A wall sign beside them holds the player name. At X=100000, a lectern holds the open transaction log.
 
 ---
 
 ## What It Is
 
-mineSQL is a Postgres-wire-compatible relational database engine written in Go. It implements real database internals — WAL, MVCC, a query executor, and a SQL parser — but instead of writing to disk, it stores every row as NBT data inside Minecraft barrel blocks in a live Minecraft world.
+mineSQL is a Postgres-wire-compatible relational database engine written in Go. It implements real database internals — WAL, MVCC, a query executor, and a SQL parser — but instead of writing to disk, it stores every row as a strip of banner blocks and wall signs in a live Minecraft world.
 
 Any tool that speaks Postgres works out of the box. `psql`, database drivers in any language, ORMs — none of them know they are talking to a Minecraft world.
 
@@ -40,9 +36,9 @@ Any tool that speaks Postgres works out of the box. `psql`, database drivers in 
 
 ## How Storage Works
 
-The Minecraft world is divided into regions. Each table occupies a fixed Y level — table 0 lives at Y=64, table 1 at Y=128, and so on. Within a Y level, chunks (16×16 block columns) act as heap pages. Each block position within a chunk holds one row, stored as JSON in the barrel's NBT tag.
+The Minecraft world is divided into regions. Each table occupies a fixed Y level — table 0 lives at Y=64, table 1 at Y=128, and so on. Within a Y level, chunks (16×16 block columns) act as heap pages. Each row occupies a fixed-width strip of blocks along the X axis: banner blocks encode INT, BIGINT, and BOOLEAN columns as heraldic pattern layers (6 bytes per banner), while wall signs hold TEXT columns (64 chars per sign).
 
-A sequential scan flies through every chunk at a table's Y level, reads the NBT from each barrel, deserializes the row, applies filters, and streams results back to the client. A write places a new barrel at the next available block position and flushes a WAL entry before the data block is touched.
+A sequential scan flies through every chunk at a table's Y level, reads the banner patterns and sign text from each row strip, deserializes the row, applies filters, and streams results back to the client. A write places a new banner+sign strip at the next available position and flushes a WAL entry — stored as a written book in a lectern at X=100000 — before the data blocks are touched.
 
 Dead rows from deletes and updates are never immediately removed. A background vacuum goroutine periodically scans for rows that no active transaction can see and replaces them with air.
 

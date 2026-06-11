@@ -6,7 +6,7 @@ This file helps coding agents (Claude, Cursor, Codex, etc.) understand the mineS
 
 ## Project Overview
 
-mineSQL is a Postgres-wire-compatible relational database engine written in Go. Its storage backend is a live Minecraft world — every row is a barrel block, every chunk is a page, every Y level is a table. It implements real database internals: WAL, MVCC, a query executor, and a SQL parser.
+mineSQL is a Postgres-wire-compatible relational database engine written in Go. Its storage backend is a live Minecraft world — every row is a strip of banner blocks and wall signs, every chunk is a page, every Y level is a table. It implements real database internals: WAL, MVCC, a query executor, and a SQL parser.
 
 Full technical spec (authoritative): [`docs/spec.md`](./docs/spec.md)
 
@@ -105,6 +105,22 @@ Understanding which layer owns what prevents putting logic in the wrong place:
 
 ---
 
+## Storage Format
+
+Rows use a hybrid banner+sign layout. Each row occupies a fixed-width strip of blocks along X at a fixed (Y, Z):
+
+- **Banners 0–1**: xmin and xmax (int64, 8 bytes each, encoded as heraldic pattern layers). Each of a banner's 6 pattern layers encodes 1 byte: high nibble = pattern type (0–15), low nibble = dye color (0–15).
+- **Banners 2..N**: INT / BIGINT / BOOLEAN columns (6 bytes per banner, packed in ordinal order). INT is 4 bytes (1 banner). BIGINT is 8 bytes (2 banners).
+- **Signs 0..M**: TEXT columns. One OAK_WALL_SIGN per TEXT column (4 lines × 16 chars = 64 chars). Longer TEXT chains multiple signs.
+
+Null sentinels: `0xFF` bytes in banner layers for numeric nulls; `"\x00NULL\x00"` on sign line 0 for TEXT nulls.
+
+WAL entries are lecterns holding written books. Each lectern is at X ≥ 100000, Y=64, Z sequentially. Book pages encode LSN, TXID, status, operation, target coordinates, and a new-value summary. Walking up to a lectern and opening it shows the raw transaction log.
+
+The catalog table (table 0, Y=64) and control block at (0, 64, 0) use the same banner+sign encoding.
+
+---
+
 ## The HAL Interface
 
 All Minecraft I/O goes through this interface. Do not call the plugin TCP connection directly from outside the `hal` package:
@@ -112,11 +128,13 @@ All Minecraft I/O goes through this interface. Do not call the plugin TCP connec
 ```go
 type Storage interface {
     ReadBlock(ctx context.Context, x, y, z int) ([]byte, error)
-    WriteBlock(ctx context.Context, x, y, z int, data []byte) error
+    WriteBlock(ctx context.Context, x, y, z int, blockType string, data []byte) error
     BatchRead(ctx context.Context, positions []BlockPos) ([][]byte, error)
     ForceLoadChunk(ctx context.Context, chunkX, chunkZ int) error
 }
 ```
+
+`blockType` is `"banner"`, `"sign"`, or `"lectern"` — the HAL uses it to select the correct plugin protocol opcode variant.
 
 ---
 
@@ -165,4 +183,4 @@ These are invariants. Never break them:
 - **WAL region overlap**: the WAL region starts at X=100000. Never place table data near this coordinate.
 - **txid counter on restart**: always read the control block on startup and add a safety margin (+100) before assigning new transaction IDs.
 - **RCON vs plugin**: do not use RCON for any data operations. RCON is single-threaded and will deadlock under load. The plugin TCP server is the only I/O path.
-- **NBT size**: row JSON must stay under ~1MB. If a row's data exceeds this, the write will be rejected by Minecraft. TOAST overflow is a v2 feature.
+- **Banner encoding**: each banner encodes exactly 6 bytes. INT is 4 bytes (1 banner, 2 bytes wasted). BIGINT is 8 bytes (2 banners). TEXT uses wall signs not banners. Never mix encoding types for a column.

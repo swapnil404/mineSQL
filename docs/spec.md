@@ -53,7 +53,7 @@ The name is intentional. Like MySQL and PostgreSQL, the SQL suffix signals what 
 | Plugin language | Java 21 | Required by Paper, standard for Minecraft plugin development |
 | Minecraft version | Latest stable at time of build | Pin in Dockerfile |
 | Container | Docker + Docker Compose | One-command setup for demos and contributors |
-| Row serialization | JSON string stored in NBT | Simple, debuggable, cross-version compatible, no binary NBT encoding needed in Go |
+| Row serialization | Hybrid banner+sign encoding | INT/BIGINT/BOOLEAN as banner pattern bytes, TEXT as wall sign lines, WAL as lectern books — visually inspectable in-game |
 
 **Language choice rationale**: Go was chosen over Rust. The project involves real DB internals, Minecraft I/O, and a Postgres wire protocol implementation simultaneously. Rust would significantly slow early development. Go is the right tradeoff for a solo developer learning DB internals at the same time as building.
 
@@ -182,7 +182,7 @@ This wraps the actual Postgres C parser via cgo. It parses any valid Postgres SQ
 
 `TEXT`, `INT`, `BIGINT`, `BOOLEAN`, `FLOAT`
 
-All values are stored as JSON strings in NBT and cast on read. Type metadata is stored in the table catalog.
+INT, BIGINT, and BOOLEAN values are encoded as heraldic banner pattern bytes; TEXT values are written to wall sign lines. Type metadata is stored in the table catalog.
 
 ---
 
@@ -259,32 +259,47 @@ Table metadata is stored in a reserved catalog table (table ID 0, Y=64). Each ro
 
 ## 9. Row Encoding
 
-Every row is serialized as a JSON string stored in the barrel block's NBT under the key `minesql_row`.
+Row storage uses a hybrid banner+sign layout. Each row occupies a fixed-width strip of blocks along the X axis at a fixed (Y, Z) coordinate.
 
-### Row format
+### Strip layout
 
-```json
-{
-  "xmin": 1,
-  "xmax": null,
-  "c0": "swapnil",
-  "c1": 42
-}
-```
+- **Banner 0**: xmin (int64, 8 bytes split across banners 0–1)
+- **Banner 1**: xmax (int64 — null encoded as `0xFFFFFFFFFFFFFFFF`)
+- **Banner 2..N**: INT / BIGINT / BOOLEAN columns (6 bytes per banner, packed in ordinal order)
+- **Sign 0..M**: TEXT columns (64 chars per sign, one OAK_WALL_SIGN per TEXT column, 4 lines × 16 chars)
 
-Column values are keyed by ordinal (`c0`, `c1`, ...) not by name. Column names are resolved via the catalog on read. This keeps row size smaller and avoids encoding column names in every block.
+### Banner byte encoding
 
-### Null values
+Each of a banner's 6 pattern layers encodes 1 byte:
 
-Null columns are encoded as JSON `null`.
+- **High nibble (bits 7–4)**: pattern type index 0–15, mapped to these 16 patterns in order:
+  `BASE`, `STRIPE_BOTTOM`, `STRIPE_TOP`, `STRIPE_LEFT`, `STRIPE_RIGHT`, `STRIPE_CENTER`,
+  `STRIPE_MIDDLE`, `STRIPE_DOWNRIGHT`, `STRIPE_DOWNLEFT`, `SMALL_STRIPES`, `CROSS`,
+  `STRAIGHT_CROSS`, `DIAGONAL_LEFT`, `DIAGONAL_RIGHT`, `DIAGONAL_UP_LEFT`, `DIAGONAL_UP_RIGHT`
+- **Low nibble (bits 3–0)**: dye color index 0–15, mapped to Minecraft's 16 dye colors:
+  `WHITE=0`, `ORANGE=1`, `MAGENTA=2`, `LIGHT_BLUE=3`, `YELLOW=4`, `LIME=5`, `PINK=6`, `GRAY=7`,
+  `LIGHT_GRAY=8`, `CYAN=9`, `PURPLE=10`, `BLUE=11`, `BROWN=12`, `GREEN=13`, `RED=14`, `BLACK=15`
 
-### Size limit
+Each banner encodes exactly 6 bytes. INT is 4 bytes (1 banner, 2 bytes wasted). BIGINT is 8 bytes (2 banners).
 
-Rows must serialize to under 900KB. If a row exceeds this, the write is rejected with an error. TOAST overflow is a v2 feature.
+### Sign encoding
 
-### Block type
+- One `OAK_WALL_SIGN` per TEXT column
+- 4 lines × 16 chars = 64 chars max per sign
+- TEXT longer than 64 chars chains multiple signs: sign count = `ceil(len / 64)`
 
-All data blocks use `minecraft:barrel`. No other block type is used for row storage.
+### Null encoding
+
+- **INT / BIGINT null**: all 6 pattern bytes set to `0xFF` in the banner layers
+- **TEXT null**: sign line 0 = `"\x00NULL\x00"`, remaining lines empty
+
+### Block type summary
+
+| Data type | Block type |
+|---|---|
+| xmin, xmax, INT, BIGINT, BOOLEAN | Banner (any color) |
+| TEXT | OAK_WALL_SIGN |
+| WAL entries | Lectern with written book |
 
 ---
 
@@ -457,28 +472,23 @@ Guarantee that writes either fully complete or are fully replayed on restart. Th
 
 ### WAL region
 
-WAL entries occupy barrels in the WAL region: all blocks at X ≥ 100000, Y=64, sequentially along Z.
+WAL entries occupy lectern blocks at X ≥ 100000, Y=64, sequentially along Z.
 
 ### Entry format
 
-Each WAL entry is a JSON string stored in a barrel's NBT:
+Each lectern holds a written book. Book pages:
 
-```json
-{
-  "lsn": 1,
-  "txid": 1,
-  "status": "PENDING",
-  "op": "INSERT",
-  "table_id": 1,
-  "target_x": 32,
-  "target_y": 128,
-  "target_z": 15,
-  "new_value": "{\"xmin\":1,\"xmax\":null,\"c0\":\"swapnil\",\"c1\":42}"
-}
-```
+- **Page 1**: `LSN: {n}\nTXID: {n}\nSTATUS: PENDING|COMMITTED`
+- **Page 2**: `OP: INSERT|UPDATE_XMAX\nTABLE: {id}`
+- **Page 3**: `X: {n}\nY: {n}\nZ: {n}`
+- **Page 4**: new value summary (first 200 chars of serialized row, truncated)
+
+Walking up to a lectern and opening it shows the raw transaction log entry in-game.
 
 `status` is either `PENDING` or `COMMITTED`.
 `op` is one of `INSERT`, `UPDATE_XMAX` (for delete/update).
+
+The WAL is also mirrored in-memory for performance — the lectern is the durable record, the in-memory map is the fast path. On startup, scan all lecterns in the WAL region to rebuild the in-memory WAL state.
 
 ### Write sequence (invariant — never deviate)
 
@@ -666,7 +676,7 @@ v1 is complete when all of the following work correctly and reliably:
 
 - `psql -h localhost -p 5432` connects successfully
 - `CREATE TABLE name (col TYPE, ...)` creates a table entry in the catalog
-- `INSERT INTO name VALUES (...)` writes a barrel block to the world
+- `INSERT INTO name VALUES (...)` writes a banner+sign strip to the world
 - `SELECT * FROM name` returns all visible rows via seq scan
 - `SELECT * FROM name WHERE col = val` applies a WHERE filter
 - `DELETE FROM name WHERE col = val` marks rows dead via xmax

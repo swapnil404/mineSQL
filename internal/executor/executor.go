@@ -51,7 +51,7 @@ func (e *Executor) executeCreateTable(ctx context.Context, stmt *parser.Statemen
 		cols[i] = storage.ColumnDef{
 			Name:    c.Name,
 			Ordinal: i,
-			Type:    c.Type,
+			Type:    normalizeType(c.Type),
 		}
 	}
 
@@ -280,6 +280,8 @@ func toFloat(v interface{}) (float64, bool) {
 		return v, true
 	case int64:
 		return float64(v), true
+	case int32:
+		return float64(v), true
 	case int:
 		return float64(v), true
 	case string:
@@ -355,8 +357,27 @@ func toInt(v interface{}) int {
 		return int(v)
 	case int:
 		return v
+	case int32:
+		return int(v)
 	case int64:
 		return int(v)
 	}
 	return 0
+}
+
+func normalizeType(t string) string {
+	switch t {
+	case "int4", "integer":
+		return "INT"
+	case "int8", "bigint":
+		return "BIGINT"
+	case "text", "varchar", "bpchar":
+		return "TEXT"
+	case "bool", "boolean":
+		return "BOOLEAN"
+	case "float4", "float8", "real", "double precision":
+		return "FLOAT"
+	default:
+		return t
+	}
 }

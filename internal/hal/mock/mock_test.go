@@ -19,7 +19,7 @@ func TestStorageReadWrite(t *testing.T) {
 		t.Errorf("expected nil for empty block, got %v", data)
 	}
 
-	if err := s.WriteBlock(ctx, 1, 2, 3, []byte("hello")); err != nil {
+	if err := s.WriteBlock(ctx, 1, 2, 3, hal.BlockTypeBarrel, []byte("hello")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -36,8 +36,8 @@ func TestStorageDelete(t *testing.T) {
 	ctx := context.Background()
 	s := NewStorage()
 
-	s.WriteBlock(ctx, 10, 20, 30, []byte("test"))
-	if err := s.WriteBlock(ctx, 10, 20, 30, nil); err != nil {
+	s.WriteBlock(ctx, 10, 20, 30, hal.BlockTypeBarrel, []byte("test"))
+	if err := s.WriteBlock(ctx, 10, 20, 30, hal.BlockTypeBarrel, nil); err != nil {
 		t.Fatalf("delete write: %v", err)
 	}
 
@@ -57,8 +57,8 @@ func TestStorageBatchRead(t *testing.T) {
 		{X: 2, Y: 2, Z: 2},
 	}
 
-	s.WriteBlock(ctx, 0, 0, 0, []byte("a"))
-	s.WriteBlock(ctx, 2, 2, 2, []byte("c"))
+	s.WriteBlock(ctx, 0, 0, 0, hal.BlockTypeBarrel, []byte("a"))
+	s.WriteBlock(ctx, 2, 2, 2, hal.BlockTypeBarrel, []byte("c"))
 
 	results, err := s.BatchRead(ctx, positions)
 	if err != nil {

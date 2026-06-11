@@ -219,41 +219,54 @@ type Node interface {
 ### World coordinate conventions
 
 ```
-Y axis  → table number (table 0 at Y=64, table 1 at Y=128, step=64)
-X axis  → column offset within a chunk page
-Z axis  → row offset within a chunk page
-Chunk   → one heap page (16×16 = 256 row slots per chunk)
+Y       → always 64 for all tables (catalog and user tables share the same Y level)
+Z axis  → table separation: table N starts at Z = N * 1,000,000
+X axis  → strip layout within a row: each column occupies successive X offsets
 ```
 
-Table N occupies all chunks at Y = `64 + (N * 64)` across the entire X/Z plane.
+All tables live at Y=64. The catalog (table ID 0) occupies Z=0 through Z=999,999. User table N occupies Z = N*1,000,000 through Z = (N+1)*1,000,000 - 1 with row R at Z = N*1,000,000 + R.
+
+Each row is a strip of blocks along X starting at X=0 at a fixed (Y=64, Z):
+- Offsets 0–1: xmin (2 banners)
+- Offsets 2–3: xmax (2 banners)
+- Offset 4+: INT/BIGINT/BOOLEAN columns (1 banner each for INT/BOOL, 2 for BIGINT)
+- After all numeric columns: TEXT columns (1 wall sign each)
+
+Strip width = 4 + (1 per INT/BOOLEAN) + (2 per BIGINT) + (1 per TEXT).
+
+Since Minecraft's Z axis is effectively infinite, this allows an unlimited number of tables and rows with no collision.
 
 ### Reserved coordinates
 
 | Coordinate | Purpose |
 |---|---|
 | (0, 64, 0) | Control block — engine metadata, max txid |
-| X ≥ 100000 | WAL region — log entries |
+| X ≥ 100000 | WAL region — lectern log entries |
+| Z 0–999999 | Catalog table rows (barrel+JSON) |
+| Z ≥ 1000000 | User table rows (banner+sign strips) |
 | X ≤ -100000 | Reserved for future use |
 
 ### Free space tracking
 
-Each table maintains an in-memory free space map: a list of (chunkX, chunkZ, slotIndex) tuples with available slots. On startup this is rebuilt by scanning the table region. On INSERT, the next available slot is consumed. On DELETE (vacuum), slots are returned to the free space map.
+Each table maintains an in-memory `RowCount` counter. On INSERT, the row is placed at Z = table.ZStart + table.RowCount and RowCount is incremented. On DELETE (vacuum), ghost rows are replaced with air but Z slots are not reclaimed in v1.
 
 ### Table catalog
 
-Table metadata is stored in a reserved catalog table (table ID 0, Y=64). Each row in the catalog describes one user table:
+Table metadata is stored in a reserved catalog area at Y=64, Z=0 onwards (table ID 0). Each row in the catalog describes one user table:
 
 ```json
 {
   "table_id": 1,
   "name": "players",
-  "y_level": 128,
+  "y_level": 64,
   "columns": [
     {"name": "name", "type": "TEXT", "ordinal": 0},
     {"name": "kills", "type": "INT", "ordinal": 1}
   ]
 }
 ```
+
+Catalog rows use barrel+JSON encoding (not banner+sign) since they are internal metadata.
 
 ---
 
@@ -263,10 +276,17 @@ Row storage uses a hybrid banner+sign layout. Each row occupies a fixed-width st
 
 ### Strip layout
 
-- **Banner 0**: xmin (int64, 8 bytes split across banners 0–1)
-- **Banner 1**: xmax (int64 — null encoded as `0xFFFFFFFFFFFFFFFF`)
-- **Banner 2..N**: INT / BIGINT / BOOLEAN columns (6 bytes per banner, packed in ordinal order)
-- **Sign 0..M**: TEXT columns (64 chars per sign, one OAK_WALL_SIGN per TEXT column, 4 lines × 16 chars)
+All strips are at Y=64 and extend along X at a fixed Z coordinate. The strip width is determined by the table schema:
+```
+stripWidth = 4 + sum(1 per INT/BOOLEAN) + sum(2 per BIGINT) + sum(1 per TEXT)
+```
+
+- **Banner 0 (X=0)**: xmin bytes 0–5 (first banner of int64)
+- **Banner 1 (X=1)**: xmin bytes 6–7 (second banner of int64, zero-padded)
+- **Banner 2 (X=2)**: xmax bytes 0–5 — null sentinel is `0xFFFFFFFFFFFFFFFF`
+- **Banner 3 (X=3)**: xmax bytes 6–7
+- **Banner 4..N**: INT / BIGINT / BOOLEAN columns (6 bytes per banner, packed in ordinal order)
+- **Sign 0..M**: TEXT columns (64 chars per sign, OAK_WALL_SIGN, 4 lines × 16 chars)
 
 ### Banner byte encoding
 

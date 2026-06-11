@@ -33,7 +33,7 @@ func (s *Storage) ReadBlock(ctx context.Context, x, y, z int) ([]byte, error) {
 	return result, nil
 }
 
-func (s *Storage) WriteBlock(ctx context.Context, x, y, z int, data []byte) error {
+func (s *Storage) WriteBlock(ctx context.Context, x, y, z int, blockType byte, data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -71,7 +71,7 @@ func (s *Storage) IsChunkLoaded(ctx context.Context, chunkX, chunkZ int) (bool, 
 
 func (s *Storage) BatchWrite(ctx context.Context, writes []hal.BlockWrite) error {
 	for _, w := range writes {
-		if err := s.WriteBlock(ctx, w.Pos.X, w.Pos.Y, w.Pos.Z, w.Data); err != nil {
+		if err := s.WriteBlock(ctx, w.Pos.X, w.Pos.Y, w.Pos.Z, w.BlockType, w.Data); err != nil {
 			return err
 		}
 	}

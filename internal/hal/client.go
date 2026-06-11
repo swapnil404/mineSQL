@@ -29,24 +29,6 @@ const (
 	dialTimeout    = 5 * time.Second
 )
 
-type BlockPos struct {
-	X, Y, Z int
-}
-
-type BlockWrite struct {
-	Pos  BlockPos
-	Data []byte
-}
-
-type Storage interface {
-	ReadBlock(ctx context.Context, x, y, z int) ([]byte, error)
-	WriteBlock(ctx context.Context, x, y, z int, data []byte) error
-	BatchRead(ctx context.Context, positions []BlockPos) ([][]byte, error)
-	BatchWrite(ctx context.Context, writes []BlockWrite) error
-	ForceLoadChunk(ctx context.Context, chunkX, chunkZ int) error
-	IsChunkLoaded(ctx context.Context, chunkX, chunkZ int) (bool, error)
-}
-
 type Client struct {
 	addr string
 	mu   sync.Mutex
@@ -91,7 +73,7 @@ func (c *Client) ReadBlock(ctx context.Context, x, y, z int) ([]byte, error) {
 	}
 }
 
-func (c *Client) WriteBlock(ctx context.Context, x, y, z int, data []byte) error {
+func (c *Client) WriteBlock(ctx context.Context, x, y, z int, blockType byte, data []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -99,12 +81,13 @@ func (c *Client) WriteBlock(ctx context.Context, x, y, z int, data []byte) error
 		return err
 	}
 
-	payload := make([]byte, 12+4+len(data))
+	payload := make([]byte, 12+1+4+len(data))
 	putInt32(payload[0:4], int32(x))
 	putInt32(payload[4:8], int32(y))
 	putInt32(payload[8:12], int32(z))
-	binary.BigEndian.PutUint32(payload[12:16], uint32(len(data)))
-	copy(payload[16:], data)
+	payload[12] = blockType
+	binary.BigEndian.PutUint32(payload[13:17], uint32(len(data)))
+	copy(payload[17:], data)
 
 	if err := c.send(ctx, opWrite, payload); err != nil {
 		return err
@@ -211,7 +194,7 @@ func (c *Client) BatchWrite(ctx context.Context, writes []BlockWrite) error {
 
 	totalPayload := 4
 	for _, w := range writes {
-		totalPayload += 12 + 4 + len(w.Data)
+		totalPayload += 12 + 1 + 4 + len(w.Data)
 	}
 	payload := make([]byte, totalPayload)
 	binary.BigEndian.PutUint32(payload[0:4], uint32(len(writes)))
@@ -221,6 +204,8 @@ func (c *Client) BatchWrite(ctx context.Context, writes []BlockWrite) error {
 		putInt32(payload[off+4:off+8], int32(w.Pos.Y))
 		putInt32(payload[off+8:off+12], int32(w.Pos.Z))
 		off += 12
+		payload[off] = w.BlockType
+		off++
 		binary.BigEndian.PutUint32(payload[off:off+4], uint32(len(w.Data)))
 		off += 4
 		copy(payload[off:], w.Data)

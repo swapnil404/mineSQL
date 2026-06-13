@@ -53,7 +53,7 @@ The name is intentional. Like MySQL and PostgreSQL, the SQL suffix signals what 
 | Plugin language | Java 21 | Required by Paper, standard for Minecraft plugin development |
 | Minecraft version | Latest stable at time of build | Pin in Dockerfile |
 | Container | Docker + Docker Compose | One-command setup for demos and contributors |
-| Row serialization | Hybrid banner+sign encoding | INT/BIGINT/BOOLEAN as banner pattern bytes, TEXT as wall sign lines, WAL as lectern books — visually inspectable in-game |
+| Row serialization | Hybrid banner+sign encoding | INT/BIGINT/BOOLEAN as banner pattern bytes, TEXT as sign lines, WAL as lectern books — visually inspectable in-game |
 
 **Language choice rationale**: Go was chosen over Rust. The project involves real DB internals, Minecraft I/O, and a Postgres wire protocol implementation simultaneously. Rust would significantly slow early development. Go is the right tradeoff for a solo developer learning DB internals at the same time as building.
 
@@ -182,7 +182,7 @@ This wraps the actual Postgres C parser via cgo. It parses any valid Postgres SQ
 
 `TEXT`, `INT`, `BIGINT`, `BOOLEAN`, `FLOAT`
 
-INT, BIGINT, and BOOLEAN values are encoded as heraldic banner pattern bytes; TEXT values are written to wall sign lines. Type metadata is stored in the table catalog.
+INT, BIGINT, and BOOLEAN values are encoded as heraldic banner pattern bytes; TEXT values are written to sign lines. Type metadata is stored in the table catalog.
 
 ---
 
@@ -219,18 +219,30 @@ type Node interface {
 ### World coordinate conventions
 
 ```
-Y       → always 64 for all tables (catalog and user tables share the same Y level)
-Z axis  → table separation: table N starts at Z = N * 1,000,000
+     west  ←  Z=0 (spawn)  →  east
+              │
+Z < 0         │         Z > 0
+WAL lecterns  │         user table data
+(transaction  │         (banner+sign strips
+ log books)   │          standing on grass)
+              │
+         underground (Y < 60)
+         catalog barrels + control block
+```
+
+```
+Y       → 64 for table data, < 60 for catalog and control block (underground)
+Z axis  → table separation: table N starts at Z = (N-1) × 10000
 X axis  → strip layout within a row: each column occupies successive X offsets
 ```
 
-All tables live at Y=64. The catalog (table ID 0) occupies Z=0 through Z=999,999. User table N occupies Z = N*1,000,000 through Z = (N+1)*1,000,000 - 1 with row R at Z = N*1,000,000 + R.
+All user table rows live at Y=64. The catalog and control block live underground at Y=10. Table N (N ≥ 1) occupies Z = (N-1)×10000 through Z = N×10000 - 1 with row R at Z = (N-1)×10000 + R.
 
 Each row is a strip of blocks along X starting at X=0 at a fixed (Y=64, Z):
 - Offsets 0–1: xmin (2 banners)
 - Offsets 2–3: xmax (2 banners)
 - Offset 4+: INT/BIGINT/BOOLEAN columns (1 banner each for INT/BOOL, 2 for BIGINT)
-- After all numeric columns: TEXT columns (1 wall sign each)
+- After all numeric columns: TEXT columns (1 standing sign each)
 
 Strip width = 4 + (1 per INT/BOOLEAN) + (2 per BIGINT) + (1 per TEXT).
 
@@ -240,11 +252,10 @@ Since Minecraft's Z axis is effectively infinite, this allows an unlimited numbe
 
 | Coordinate | Purpose |
 |---|---|
-| (0, 64, 0) | Control block — engine metadata, max txid |
-| X ≥ 100000 | WAL region — lectern log entries |
-| Z 0–999999 | Catalog table rows (barrel+JSON) |
-| Z ≥ 1000000 | User table rows (banner+sign strips) |
-| X ≤ -100000 | Reserved for future use |
+| (0, 10, 0) | Control block — engine metadata, max txid |
+| Z < 0, Y=64 | WAL region — lectern log entries |
+| Z ≥ 0, Y=10 | Catalog table rows (barrel+JSON) |
+| Z ≥ 0, Y=64 | User table rows (banner+sign strips) |
 
 ### Free space tracking
 
@@ -252,7 +263,7 @@ Each table maintains an in-memory `RowCount` counter. On INSERT, the row is plac
 
 ### Table catalog
 
-Table metadata is stored in a reserved catalog area at Y=64, Z=0 onwards (table ID 0). Each row in the catalog describes one user table:
+Table metadata is stored in a reserved catalog area at Y=10, Z=0 onwards. Each row in the catalog describes one user table:
 
 ```json
 {
@@ -286,7 +297,7 @@ stripWidth = 4 + sum(1 per INT/BOOLEAN) + sum(2 per BIGINT) + sum(1 per TEXT)
 - **Banner 2 (X=2)**: xmax bytes 0–5 — null sentinel is `0xFFFFFFFFFFFFFFFF`
 - **Banner 3 (X=3)**: xmax bytes 6–7
 - **Banner 4..N**: INT / BIGINT / BOOLEAN columns (6 bytes per banner, packed in ordinal order)
-- **Sign 0..M**: TEXT columns (64 chars per sign, OAK_WALL_SIGN, 4 lines × 16 chars)
+- **Sign 0..M**: TEXT columns (64 chars per sign, OAK_SIGN, 4 lines × 16 chars)
 
 ### Banner byte encoding
 
@@ -304,7 +315,7 @@ Each banner encodes exactly 6 bytes. INT is 4 bytes (1 banner, 2 bytes wasted). 
 
 ### Sign encoding
 
-- One `OAK_WALL_SIGN` per TEXT column
+- One `OAK_SIGN` per TEXT column
 - 4 lines × 16 chars = 64 chars max per sign
 - TEXT longer than 64 chars chains multiple signs: sign count = `ceil(len / 64)`
 
@@ -318,7 +329,7 @@ Each banner encodes exactly 6 bytes. INT is 4 bytes (1 banner, 2 bytes wasted). 
 | Data type | Block type |
 |---|---|
 | xmin, xmax, INT, BIGINT, BOOLEAN | Banner (any color) |
-| TEXT | OAK_WALL_SIGN |
+| TEXT | OAK_SIGN |
 | WAL entries | Lectern with written book |
 
 ---
@@ -396,9 +407,18 @@ Before any read or write in a new chunk, `ForceLoadChunk` must be called. The HA
 [4] x (int32)
 [4] y (int32)
 [4] z (int32)
+[1] block type (uint8): 0x00=barrel, 0x01=banner, 0x02=sign, 0x03=lectern
 [4] data length (uint32)
-[N] data (UTF-8 JSON string)
+[N] data (UTF-8 string)
 ```
+
+Block type behavior:
+- **0x00 BARREL** — places a barrel, stores data in PersistentDataContainer under key `minesql:minesql_row`
+- **0x01 BANNER** — places a standing WHITE_BANNER. Data is 6 hex-encoded banner pattern bytes, each byte = high nibble (pattern type index 0–15) + low nibble (DyeColor ordinal 0–15)
+- **0x02 SIGN** — places a standing OAK_SIGN. Data is up to 4 lines delimited by `\0`, each line truncated to 16 chars
+- **0x03 LECTERN** — places a LECTERN with a written book. Data is book content, pages separated by `\n---\n`
+
+Empty data (data length 0) sets the block to AIR regardless of block type.
 
 Response: `ACK`
 
@@ -469,8 +489,9 @@ per entry:
   [4] x (int32)
   [4] y (int32)
   [4] z (int32)
+  [1] block type (uint8): 0x00=barrel, 0x01=banner, 0x02=sign, 0x03=lectern
   [4] data length (uint32)
-  [N] data (UTF-8 JSON string)
+  [N] data (UTF-8 string)
 ```
 
 Response: `ACK`
@@ -492,7 +513,7 @@ Guarantee that writes either fully complete or are fully replayed on restart. Th
 
 ### WAL region
 
-WAL entries occupy lectern blocks at X ≥ 100000, Y=64, sequentially along Z.
+WAL entries occupy lectern blocks at Z < 0, Y=64.
 
 ### Entry format
 
@@ -533,7 +554,7 @@ If the process dies before step 2 completes: no entry exists, nothing to recover
 Recovery runs on every startup before the wire server accepts connections:
 
 ```
-1. Scan all blocks in the WAL region (X ≥ 100000, Y=64)
+1. Scan all blocks in the WAL region (Z < 0, Y=64)
 2. For each PENDING entry:
    a. Read the target data block
    b. If missing or does not match new_value: replay the data write
@@ -605,7 +626,7 @@ v1 implements autocommit — every statement is its own transaction. Explicit `B
 
 ### Storage
 
-The current maximum transaction ID is stored in the control block at `(0, 64, 0)`:
+The current maximum transaction ID is stored in the control block at `(0, 10, 0)`: 
 
 ```json
 {
@@ -682,9 +703,9 @@ Steps:
 ### Pre-seeded world
 
 The `docker/world/` directory contains a minimal Minecraft world where:
-- The control block at (0, 64, 0) exists with `max_txid=0, max_lsn=0`
-- The catalog table region (Y=64) is forceloaded
-- The WAL region (X=100000, Y=64) is forceloaded
+- The control block at (0, 10, 0) exists with `max_txid=0, max_lsn=0`
+- The catalog table region (Y=10) is forceloaded
+- The WAL region (Z < 0, Y=64) is forceloaded
 
 This means the engine can start and accept connections immediately without a bootstrap step.
 

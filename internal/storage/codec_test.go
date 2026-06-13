@@ -30,12 +30,12 @@ func TestEncodeInt32Length(t *testing.T) {
 
 func TestEncodeInt32ZeroPadding(t *testing.T) {
 	enc := EncodeInt32(0)
-	if enc != "000000000000" {
-		t.Errorf("EncodeInt32(0): expected '000000000000', got %q", enc)
+	if enc != "555555555555" {
+		t.Errorf("EncodeInt32(0): expected '555555555555', got %q", enc)
 	}
 	enc = EncodeInt32(1)
-	if enc != "000000010000" {
-		t.Errorf("EncodeInt32(1): expected '000000010000', got %q", enc)
+	if enc != "555555545555" {
+		t.Errorf("EncodeInt32(1): expected '555555545555', got %q", enc)
 	}
 }
 
@@ -93,8 +93,8 @@ func TestEncodeInt64Roundtrip(t *testing.T) {
 
 func TestEncodeInt64Zero(t *testing.T) {
 	s1, s2 := EncodeInt64(0)
-	if s1 != "000000000000" || s2 != "000000000000" {
-		t.Errorf("EncodeInt64(0): expected all zeros, got %q %q", s1, s2)
+	if s1 != "555555555555" || s2 != "555555555555" {
+		t.Errorf("EncodeInt64(0): expected all 55s, got %q %q", s1, s2)
 	}
 }
 
@@ -152,11 +152,11 @@ func TestEncodeBoolRoundtrip(t *testing.T) {
 }
 
 func TestEncodeBoolValues(t *testing.T) {
-	if enc := EncodeBool(true); enc != "010000000000" {
-		t.Errorf("EncodeBool(true): expected '010000000000', got %q", enc)
+	if enc := EncodeBool(true); enc != "545555555555" {
+		t.Errorf("EncodeBool(true): expected '545555555555', got %q", enc)
 	}
-	if enc := EncodeBool(false); enc != "000000000000" {
-		t.Errorf("EncodeBool(false): expected '000000000000', got %q", enc)
+	if enc := EncodeBool(false); enc != "555555555555" {
+		t.Errorf("EncodeBool(false): expected '555555555555', got %q", enc)
 	}
 }
 

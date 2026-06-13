@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	catalogY       = 64
-	tableZSpacing  = 1000000
+	catalogY       = 10
+	tableY         = 64
+	tableZSpacing  = 10000
 	systemTxID     = 1
 	maxCatalogZ    = 1024
 )
@@ -93,13 +94,13 @@ func (s *Storage) LoadCatalog(ctx context.Context) error {
 			continue
 		}
 
-		zStart := entry.TableID * tableZSpacing
+		zStart := (entry.TableID - 1) * tableZSpacing
 		stripW := stripWidth(entry.Columns)
 
 		meta := &TableMeta{
 			ID:         entry.TableID,
 			Name:       entry.Name,
-			YLevel:     catalogY,
+			YLevel:     tableY,
 			ZStart:     zStart,
 			StripWidth: stripW,
 			Columns:    entry.Columns,
@@ -130,13 +131,13 @@ func (s *Storage) CreateTable(ctx context.Context, name string, cols []ColumnDef
 	}
 
 	id := s.nextTableID
-	zStart := id * tableZSpacing
+	zStart := (id - 1) * tableZSpacing
 	stripW := stripWidth(cols)
 
 	entry := catalogEntry{
 		TableID: id,
 		Name:    name,
-		YLevel:  catalogY,
+		YLevel:  tableY,
 		Columns: cols,
 	}
 	colsJSON, err := json.Marshal(entry.Columns)
@@ -168,7 +169,7 @@ func (s *Storage) CreateTable(ctx context.Context, name string, cols []ColumnDef
 	s.tables[name] = &TableMeta{
 		ID:         id,
 		Name:       name,
-		YLevel:     catalogY,
+		YLevel:     tableY,
 		ZStart:     zStart,
 		StripWidth: stripW,
 		Columns:    cols,

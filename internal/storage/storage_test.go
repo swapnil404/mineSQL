@@ -42,11 +42,11 @@ func TestCreateTable(t *testing.T) {
 	if meta.ID != 1 {
 		t.Errorf("expected ID 1, got %d", meta.ID)
 	}
-	if meta.YLevel != catalogY {
-		t.Errorf("expected YLevel %d, got %d", catalogY, meta.YLevel)
+	if meta.YLevel != tableY {
+		t.Errorf("expected YLevel %d, got %d", tableY, meta.YLevel)
 	}
-	if meta.ZStart != 1*tableZSpacing {
-		t.Errorf("expected ZStart %d, got %d", 1*tableZSpacing, meta.ZStart)
+	if meta.ZStart != 0 {
+		t.Errorf("expected ZStart 0, got %d", meta.ZStart)
 	}
 	if len(meta.Columns) != 2 {
 		t.Fatalf("expected 2 columns, got %d", len(meta.Columns))
@@ -99,8 +99,8 @@ func TestInsertRow(t *testing.T) {
 		t.Fatalf("InsertRow: %v", err)
 	}
 
-	if pos.Y != catalogY {
-		t.Errorf("expected Y=%d, got %d", catalogY, pos.Y)
+	if pos.Y != tableY {
+		t.Errorf("expected Y=%d, got %d", tableY, pos.Y)
 	}
 	if pos.Z != meta.ZStart {
 		t.Errorf("expected Z=%d (first row), got %d", meta.ZStart, pos.Z)
@@ -144,13 +144,13 @@ func TestInsertRowStripLayout(t *testing.T) {
 	if pos.X != 0 {
 		t.Errorf("expected X=0, got %d", pos.X)
 	}
-	if pos.Y != catalogY {
-		t.Errorf("expected Y=%d, got %d", catalogY, pos.Y)
+	if pos.Y != tableY {
+		t.Errorf("expected Y=%d, got %d", tableY, pos.Y)
 	}
 
 	// Verify xmin banners
-	b0, _ := h.ReadBlock(ctx, 0, catalogY, pos.Z)
-	b1, _ := h.ReadBlock(ctx, 1, catalogY, pos.Z)
+	b0, _ := h.ReadBlock(ctx, 0, tableY, pos.Z)
+	b1, _ := h.ReadBlock(ctx, 1, tableY, pos.Z)
 	if b0 == nil || b1 == nil {
 		t.Fatal("xmin banners not written")
 	}
@@ -163,14 +163,14 @@ func TestInsertRowStripLayout(t *testing.T) {
 	}
 
 	// Verify xmax banners are null
-	bX0, _ := h.ReadBlock(ctx, 2, catalogY, pos.Z)
-	bX1, _ := h.ReadBlock(ctx, 3, catalogY, pos.Z)
+	bX0, _ := h.ReadBlock(ctx, 2, tableY, pos.Z)
+	bX1, _ := h.ReadBlock(ctx, 3, tableY, pos.Z)
 	if !IsNull(string(bX0), string(bX1)) {
 		t.Error("expected xmax null sentinel")
 	}
 
 	// Verify INT column
-	bInt, _ := h.ReadBlock(ctx, 4, catalogY, pos.Z)
+	bInt, _ := h.ReadBlock(ctx, 4, tableY, pos.Z)
 	decInt, err := DecodeInt32(string(bInt))
 	if err != nil {
 		t.Fatalf("decode INT: %v", err)
@@ -180,7 +180,7 @@ func TestInsertRowStripLayout(t *testing.T) {
 	}
 
 	// Verify TEXT column
-	bText, _ := h.ReadBlock(ctx, 5, catalogY, pos.Z)
+	bText, _ := h.ReadBlock(ctx, 5, tableY, pos.Z)
 	lines := decodeSignData(bText)
 	decoded := DecodeText(lines)
 	if decoded != "hello" {
@@ -388,7 +388,7 @@ func TestMarkDeletedNonExistent(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStorage(t)
 
-	pos := hal.BlockPos{X: 0, Y: catalogY, Z: 999}
+	pos := hal.BlockPos{X: 0, Y: tableY, Z: 999}
 	err := s.MarkDeleted(ctx, pos, 10)
 	if err == nil {
 		t.Fatal("expected error for non-existent row")
@@ -430,7 +430,7 @@ func TestZStart(t *testing.T) {
 			t.Fatalf("CreateTable %q: %v", name, err)
 		}
 		meta, _ := s.GetTable(ctx, name)
-		expectedZ := meta.ID * tableZSpacing
+		expectedZ := (meta.ID - 1) * tableZSpacing
 		if meta.ZStart != expectedZ {
 			t.Errorf("table %q (ID=%d): expected ZStart=%d, got %d", name, meta.ID, expectedZ, meta.ZStart)
 		}

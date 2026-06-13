@@ -6,13 +6,13 @@ This file helps coding agents (Claude, Cursor, Codex, etc.) understand the mineS
 
 ## Project Overview
 
-mineSQL is a Postgres-wire-compatible relational database engine written in Go. Its storage backend is a live Minecraft world — every row is a strip of banner blocks and wall signs, every chunk is a page, every Y level is a table. It implements real database internals: WAL, MVCC, a query executor, and a SQL parser.
+mineSQL is a Postgres-wire-compatible relational database engine written in Go. Its storage backend is a live Minecraft world — every row is a strip of banner blocks and signs standing on grass, the transaction log is a row of lecterns to the west of spawn, and internal metadata lives underground. It implements real database internals: WAL, MVCC, a query executor, and a SQL parser.
 
 Full technical spec (authoritative): [`docs/spec.md`](./docs/spec.md)
 
 **When in doubt about any decision — build order, wire protocol messages, WAL invariants, row encoding format, plugin protocol opcodes — the spec wins.**
 
-The Paper plugin (Java, separate repo) lives at: `github.com/swapnil404/minesql-plugin`
+The Paper plugin (Java, separate repo) lives at: `github.com/swapnil404/minesql-hal`
 
 ---
 
@@ -26,16 +26,17 @@ minesql/
 │   ├── parser/          # SQL parsing (pganalyze/pg_query_go)
 │   ├── planner/         # query planner — produces execution plans
 │   ├── executor/        # pull-based query executor
-│   ├── storage/         # row encoding, page/chunk layout, table metadata
+│   ├── storage/         # row encoding, strip layout, table metadata, codec
 │   ├── wal/             # write-ahead log, crash recovery
 │   ├── mvcc/            # transaction manager, xmin/xmax visibility
 │   └── hal/             # Minecraft HAL — TCP client to Paper plugin
 ├── docker/
 │   ├── Dockerfile       # Paper server image with plugin pre-installed
-│   └── world/           # pre-seeded world (WAL region + control block)
+│   └── world/           # pre-seeded superflat world
 ├── docker-compose.yml
 ├── docker-compose.dev.yml
 └── docs/
+    ├── spec.md
     └── architecture.md
 ```
 
@@ -48,13 +49,13 @@ minesql/
 go build ./cmd/minesql
 
 # Run (requires Minecraft server running, see docker-compose.dev.yml)
-go run ./cmd/minesql
+MINESQL_MINECRAFT_ADDR=localhost:25576 MINESQL_PORT=5455 go run ./cmd/minesql
 
 # Run all tests
 go test ./...
 
 # Run tests for a specific package
-go test ./internal/wal/...
+go test ./internal/storage/...
 
 # Lint
 golangci-lint run
@@ -86,6 +87,26 @@ docker compose up
 
 ---
 
+## World Layout
+
+```
+     west  ←  Z=0 (spawn)  →  east
+              │
+Z < 0         │         Z > 0
+WAL lecterns  │         user table data
+(transaction  │         (banner+sign strips
+ log books)   │          standing on grass)
+              │
+         underground (Y < 60)
+         catalog barrels + control block
+```
+
+- **Z > 0, Y=64** — user table data. Table N (N >= 1) starts at Z = (N-1) × 10000. Each row is a strip of banners and signs along X.
+- **Z < 0, Y=64** — WAL lecterns. Each lectern is one transaction log entry. Walk west = older transactions.
+- **Underground (Y=10)** — catalog (table metadata as barrels) and control block at (0, 10, 0). Never visible to users.
+
+---
+
 ## Layer Responsibilities
 
 Understanding which layer owns what prevents putting logic in the wrong place:
@@ -96,28 +117,33 @@ Understanding which layer owns what prevents putting logic in the wrong place:
 | `parser` | AST construction from SQL string | planning, execution |
 | `planner` | Choosing scan strategy, plan tree | executing plans |
 | `executor` | Iterating over plan, producing rows | storage format, Minecraft |
-| `storage` | Row encoding, page layout, table metadata | WAL, MVCC, Minecraft |
+| `storage` | Row encoding, strip layout, table metadata | WAL, MVCC, Minecraft |
 | `wal` | Log entry write/read, crash recovery | storage format details |
 | `mvcc` | Transaction IDs, xmin/xmax visibility | row encoding |
 | `hal` | TCP connection to plugin, block I/O | everything above |
 
-**Critical rule**: the `hal` package must never import any other internal package. It is the bottom of the dependency graph. If you find yourself importing `storage` from `hal`, something is wrong.
+**Critical rule**: the `hal` package must never import any other internal package. It is the bottom of the dependency graph.
 
 ---
 
 ## Storage Format
 
-Rows use a hybrid banner+sign layout. Each row occupies a fixed-width strip of blocks along X at a fixed (Y, Z):
+Rows use a hybrid banner+sign layout. Each row occupies a fixed-width strip of blocks along X at Y=64, Z=(tableZStart + rowIndex):
 
-- **Banners 0–1**: xmin and xmax (int64, 8 bytes each, encoded as heraldic pattern layers). Each of a banner's 6 pattern layers encodes 1 byte: high nibble = pattern type (0–15), low nibble = dye color (0–15).
-- **Banners 2..N**: INT / BIGINT / BOOLEAN columns (6 bytes per banner, packed in ordinal order). INT is 4 bytes (1 banner). BIGINT is 8 bytes (2 banners).
-- **Signs 0..M**: TEXT columns. One OAK_WALL_SIGN per TEXT column (4 lines × 16 chars = 64 chars). Longer TEXT chains multiple signs.
+- **Banners 0–1**: xmin (int64, 8 bytes across 2 banners)
+- **Banners 2–3**: xmax (int64, null = 0xFFFFFFFFFFFFFFFF)
+- **Banners 4..N**: INT/BIGINT/BOOLEAN columns in ordinal order. INT = 1 banner (4 bytes, 2 wasted). BIGINT = 2 banners. BOOLEAN = 1 banner.
+- **Signs 0..M**: TEXT columns. One standing OAK_SIGN per TEXT column (4 lines × 16 chars = 64 chars max).
 
-Null sentinels: `0xFF` bytes in banner layers for numeric nulls; `"\x00NULL\x00"` on sign line 0 for TEXT nulls.
+Banner byte encoding — each of the 6 pattern layers encodes 1 byte:
+- High nibble (bits 7–4) = pattern type index 0–15
+- Low nibble (bits 3–0) = dye color index 0–15 (WHITE=0 ... BLACK=15)
 
-WAL entries are lecterns holding written books. Each lectern is at X ≥ 100000, Y=64, Z sequentially. Book pages encode LSN, TXID, status, operation, target coordinates, and a new-value summary. Walking up to a lectern and opening it shows the raw transaction log.
+Codec lives in `internal/storage/codec.go`. All encode/decode functions are there.
 
-The catalog table (table 0, Y=64) and control block at (0, 64, 0) use the same banner+sign encoding.
+WAL entries are lecterns at Z < 0, Y=64. Each lectern holds a written book with pages: LSN + TXID + STATUS, operation + table ID, target coordinates, new value summary. Open a lectern in-game to read the transaction log.
+
+Catalog rows and control block use barrel+JSON (internal only, not banner encoding).
 
 ---
 
@@ -128,13 +154,29 @@ All Minecraft I/O goes through this interface. Do not call the plugin TCP connec
 ```go
 type Storage interface {
     ReadBlock(ctx context.Context, x, y, z int) ([]byte, error)
-    WriteBlock(ctx context.Context, x, y, z int, blockType string, data []byte) error
+    WriteBlock(ctx context.Context, x, y, z int, blockType byte, data []byte) error
     BatchRead(ctx context.Context, positions []BlockPos) ([][]byte, error)
+    BatchWrite(ctx context.Context, writes []BlockWrite) error
     ForceLoadChunk(ctx context.Context, chunkX, chunkZ int) error
+    IsChunkLoaded(ctx context.Context, chunkX, chunkZ int) (bool, error)
+}
+
+type BlockWrite struct {
+    Pos       BlockPos
+    BlockType byte
+    Data      []byte
 }
 ```
 
-`blockType` is `"banner"`, `"sign"`, or `"lectern"` — the HAL uses it to select the correct plugin protocol opcode variant.
+Block type constants defined in `internal/hal/hal.go`:
+```go
+const (
+    BlockTypeBarrel  byte = 0x00
+    BlockTypeBanner  byte = 0x01
+    BlockTypeSign    byte = 0x02
+    BlockTypeLectern byte = 0x03
+)
+```
 
 ---
 
@@ -155,13 +197,13 @@ These are invariants. Never break them:
 - A DELETE sets `xmax` on the existing row — it never removes the block
 - An UPDATE is always a DELETE + INSERT — never mutate a row in place
 - A SELECT must filter rows through the MVCC visibility check before returning them
-- The transaction ID counter is persisted in the control block at `(0, 64, 0)` — always read it on startup, never assume it starts at 1
+- The transaction ID counter is persisted in the control block at `(0, 10, 0)` — always read it on startup, never assume it starts at 1
 
 ---
 
 ## Testing
 
-- Unit tests live alongside the package they test (`internal/wal/wal_test.go`)
+- Unit tests live alongside the package they test (`internal/storage/storage_test.go`)
 - Integration tests that require a live Minecraft connection are in `internal/hal/integration_test.go` and are skipped unless `MINESQL_MINECRAFT_ADDR` is set
 - When writing tests for the storage layer, use the `hal/mock` package — never require a real Minecraft server for unit tests
 - Test table names should use `t.Name()` to avoid collisions between parallel tests
@@ -170,17 +212,18 @@ These are invariants. Never break them:
 
 ## Security Considerations
 
-- The plugin TCP server (port 25576) must never be exposed to the public internet — it has no authentication. It is internal only.
-- The Postgres wire server (port 5432) has no authentication in v1 — document this clearly, do not silently accept any username/password
-- Never log row data at INFO level — it may contain sensitive values. Use DEBUG only.
-- The Minecraft RCON port (25575) should be disabled in `server.properties` — mineSQL uses the plugin protocol exclusively
+- The plugin TCP server (port 25576) must never be exposed to the public internet — it has no authentication
+- The Postgres wire server has no authentication in v1 — document this clearly
+- Never log row data at INFO level — use DEBUG only
+- RCON must be disabled in `server.properties` — mineSQL uses the plugin protocol exclusively
 
 ---
 
 ## Common Pitfalls
 
 - **Chunk not loaded**: if a HAL read returns empty data unexpectedly, check whether the target chunk is forceloaded. Call `ForceLoadChunk` before any table scan.
-- **WAL region overlap**: the WAL region starts at X=100000. Never place table data near this coordinate.
+- **WAL region**: WAL lecterns are at Z < 0. Never place user table data at negative Z.
 - **txid counter on restart**: always read the control block on startup and add a safety margin (+100) before assigning new transaction IDs.
-- **RCON vs plugin**: do not use RCON for any data operations. RCON is single-threaded and will deadlock under load. The plugin TCP server is the only I/O path.
-- **Banner encoding**: each banner encodes exactly 6 bytes. INT is 4 bytes (1 banner, 2 bytes wasted). BIGINT is 8 bytes (2 banners). TEXT uses wall signs not banners. Never mix encoding types for a column.
+- **RCON vs plugin**: do not use RCON for any data operations. The plugin TCP server is the only I/O path.
+- **Banner encoding**: each banner encodes exactly 6 bytes. INT = 1 banner (4 bytes, 2 wasted). BIGINT = 2 banners. TEXT uses signs not banners. Never mix.
+- **Standing blocks**: use standing banners (WHITE_BANNER) and floor signs (OAK_SIGN) — wall variants need a backing block and will not survive placement in open air.

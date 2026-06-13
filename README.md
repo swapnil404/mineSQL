@@ -22,13 +22,13 @@ minesql=# SELECT * FROM players WHERE kills > 10;
 (1 row)
 ```
 
-Somewhere in the Minecraft world, a strip of banner blocks at coordinates (32, 128, 15) encodes that row as heraldic pattern layers. A wall sign beside them holds the player name. At X=100000, a lectern holds the open transaction log.
+Somewhere in the Minecraft world, a strip of banner blocks standing on grass at Z=10000 encodes that row as heraldic pattern layers. A sign beside them reads "swapnil". Walk west from spawn and a row of lecterns holds the open transaction log.
 
 ---
 
 ## What It Is
 
-mineSQL is a Postgres-wire-compatible relational database engine written in Go. It implements real database internals — WAL, MVCC, a query executor, and a SQL parser — but instead of writing to disk, it stores every row as a strip of banner blocks and wall signs in a live Minecraft world.
+mineSQL is a Postgres-wire-compatible relational database engine written in Go. It implements real database internals — WAL, MVCC, a query executor, and a SQL parser — but instead of writing to disk, it stores every row as a strip of banner blocks and signs standing on grass in a live Minecraft world.
 
 Any tool that speaks Postgres works out of the box. `psql`, database drivers in any language, ORMs — none of them know they are talking to a Minecraft world.
 
@@ -36,11 +36,17 @@ Any tool that speaks Postgres works out of the box. `psql`, database drivers in 
 
 ## How Storage Works
 
-The Minecraft world is divided into regions. Each table occupies a fixed Y level — table 0 lives at Y=64, table 1 at Y=128, and so on. Within a Y level, chunks (16×16 block columns) act as heap pages. Each row occupies a fixed-width strip of blocks along the X axis: banner blocks encode INT, BIGINT, and BOOLEAN columns as heraldic pattern layers (6 bytes per banner), while wall signs hold TEXT columns (64 chars per sign).
+The world is the database. Spawn is the origin.
 
-A sequential scan flies through every chunk at a table's Y level, reads the banner patterns and sign text from each row strip, deserializes the row, applies filters, and streams results back to the client. A write places a new banner+sign strip at the next available position and flushes a WAL entry — stored as a written book in a lectern at X=100000 — before the data blocks are touched.
+**Walk east** — you are walking through your tables. Each table occupies a Z region on the surface. Every row is a horizontal strip of standing banners and signs. Banner blocks encode INT, BIGINT, and BOOLEAN columns as heraldic pattern layers (6 bytes per banner, pattern type = high nibble, dye color = low nibble). Signs hold TEXT columns (64 chars per sign). Each row strip stands on the grass at Y=64, visible from above.
 
-Dead rows from deletes and updates are never immediately removed. A background vacuum goroutine periodically scans for rows that no active transaction can see and replaces them with air.
+**Walk west** — you are walking through the transaction log. Each WAL entry is a lectern block holding a written book. Open any lectern and read the raw transaction: LSN, TXID, STATUS, operation, target coordinates, new value. The further west you go, the older the transaction.
+
+**Dig down** — you are reading internal metadata. The catalog (table definitions) and control block (max transaction ID) live underground, out of sight.
+
+A sequential scan flies through the Z region of a table, reads the banner patterns and sign text from each row strip, deserializes the row, applies MVCC visibility and WHERE filters, and streams results back to the client. A write appends a new strip at the next Z position and flushes a WAL lectern entry before the data blocks are touched.
+
+Dead rows from deletes and updates are never immediately removed — their xmax banner is updated. A background vacuum goroutine periodically replaces dead strips with air.
 
 ---
 
@@ -64,10 +70,26 @@ psql / any Postgres client
 └─────────────────────────────────┘
         │
         ▼
-  Minecraft World
+  Minecraft World (superflat, structures off)
 ```
 
-The Paper plugin is a separate repository: [swapnil404/minesql-plugin](https://github.com/swapnil404/minesql-plugin)
+The Paper plugin is a separate repository: [swapnil404/minesql-hal](https://github.com/swapnil404/minesql-hal)
+
+---
+
+## World Layout
+
+```
+     west  ←  Z=0 (spawn)  →  east
+              │
+Z < 0         │         Z > 0
+WAL lecterns  │         user table data
+(transaction  │         (banner+sign strips
+ log books)   │          standing on grass)
+              │
+         underground
+         catalog + control block
+```
 
 ---
 
@@ -100,14 +122,6 @@ psql -h localhost -p 5432 -U minecraft -d minesql
 docker compose -f docker-compose.dev.yml up
 go run ./cmd/minesql
 ```
-
----
-
-## Inspiration
-
-Inspired by [discodb](https://github.com/lasect/discodb) — a database that uses Discord as its storage backend. mineSQL applies the same philosophy to Minecraft, with the added dimension that the world becomes a live, walkable visualization of database internals.
-
----
 
 ## License
 

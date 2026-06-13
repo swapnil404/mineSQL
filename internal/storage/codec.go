@@ -6,12 +6,14 @@ import (
 	"fmt"
 )
 
+const xormask byte = 0x55
+
 const (
 	bytesPerBanner = 6
 	signLineLen    = 16
 	signLines      = 4
 	signMaxLen     = signLineLen * signLines // 64
-	nullHex        = "ffffffffffff"
+	nullHex        = "aaaaaaaaaaaa"
 	nullTextMarker = "\x00NULL\x00"
 )
 
@@ -20,6 +22,9 @@ const (
 func EncodeInt32(v int32) string {
 	b := make([]byte, bytesPerBanner)
 	binary.BigEndian.PutUint32(b[0:4], uint32(v))
+	for i := range b {
+		b[i] ^= xormask
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -32,6 +37,9 @@ func DecodeInt32(s string) (int32, error) {
 	if len(b) != bytesPerBanner {
 		return 0, fmt.Errorf("codec: expected %d bytes, got %d", bytesPerBanner, len(b))
 	}
+	for i := range b {
+		b[i] ^= xormask
+	}
 	return int32(binary.BigEndian.Uint32(b[0:4])), nil
 }
 
@@ -40,6 +48,9 @@ func DecodeInt32(s string) (int32, error) {
 func EncodeInt64(v int64) (string, string) {
 	b := make([]byte, bytesPerBanner*2)
 	binary.BigEndian.PutUint64(b[0:8], uint64(v))
+	for i := range b {
+		b[i] ^= xormask
+	}
 	return hex.EncodeToString(b[0:6]), hex.EncodeToString(b[6:12])
 }
 
@@ -59,6 +70,9 @@ func DecodeInt64(s1, s2 string) (int64, error) {
 	b := make([]byte, 8)
 	copy(b[0:6], b1)
 	copy(b[6:8], b2[0:2])
+	for i := range b {
+		b[i] ^= xormask
+	}
 	return int64(binary.BigEndian.Uint64(b)), nil
 }
 
@@ -79,6 +93,9 @@ func EncodeBool(v bool) string {
 	if v {
 		b[0] = 1
 	}
+	for i := range b {
+		b[i] ^= xormask
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -91,7 +108,7 @@ func DecodeBool(s string) (bool, error) {
 	if len(b) != bytesPerBanner {
 		return false, fmt.Errorf("codec: expected %d bytes, got %d", bytesPerBanner, len(b))
 	}
-	return b[0] != 0, nil
+	return (b[0] ^ xormask) != 0, nil
 }
 
 // EncodeText splits a UTF-8 string into sign lines: 4 lines of 16 chars each.

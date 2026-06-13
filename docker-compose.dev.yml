@@ -1,0 +1,19 @@
+services:
+  minecraft:
+    build: ./docker
+    ports:
+      - "${MINECRAFT_GAME_PORT:-25565}:25565"
+      - "${MINECRAFT_PLUGIN_PORT:-25576}:25576"
+    stdin_open: true
+    tty: true
+    environment:
+      EULA: "true"
+      MINESQL_HOST: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/localhost/25576' 2>/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 15s

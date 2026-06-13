@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/swapnil404/minesql/internal/hal"
+	"github.com/swapnil404/minesql/internal/wal"
 )
 
 const (
@@ -45,6 +46,7 @@ type TableMeta struct {
 
 type Storage struct {
 	hal            hal.Storage
+	wal            *wal.WAL
 	mu             sync.Mutex
 	tables         map[string]*TableMeta
 	nextCatalogZ   int
@@ -58,9 +60,10 @@ type catalogEntry struct {
 	Columns []ColumnDef `json:"columns"`
 }
 
-func NewStorage(h hal.Storage) *Storage {
+func NewStorage(h hal.Storage, w *wal.WAL) *Storage {
 	s := &Storage{
 		hal:         h,
+		wal:         w,
 		tables:      make(map[string]*TableMeta),
 		nextTableID: 1,
 	}
@@ -254,8 +257,22 @@ func (s *Storage) InsertRow(ctx context.Context, table *TableMeta, values map[st
 		offset++
 	}
 
+	newValueJSON, err := json.Marshal(values)
+	if err != nil {
+		return hal.BlockPos{}, fmt.Errorf("storage: marshal values for WAL: %w", err)
+	}
+
+	lsn, err := s.wal.Append(ctx, txid, "INSERT", table.ID, 0, stripY, z, string(newValueJSON))
+	if err != nil {
+		return hal.BlockPos{}, fmt.Errorf("storage: wal append: %w", err)
+	}
+
 	if err := s.hal.BatchWrite(ctx, writes); err != nil {
 		return hal.BlockPos{}, fmt.Errorf("storage: batch write: %w", err)
+	}
+
+	if err := s.wal.Commit(ctx, lsn); err != nil {
+		return hal.BlockPos{}, fmt.Errorf("storage: wal commit: %w", err)
 	}
 
 	return hal.BlockPos{X: 0, Y: stripY, Z: z}, nil
@@ -362,6 +379,14 @@ func (s *Storage) MarkDeleted(ctx context.Context, pos hal.BlockPos, txid int64)
 		return fmt.Errorf("storage: empty xmax at position (%d,%d,%d)", pos.X, pos.Y, pos.Z)
 	}
 
+	tableID := (pos.Z / tableZSpacing) + 1
+	newValue := fmt.Sprintf("%d", txid)
+
+	lsn, err := s.wal.Append(ctx, txid, "UPDATE_XMAX", tableID, pos.X, pos.Y, pos.Z, newValue)
+	if err != nil {
+		return fmt.Errorf("storage: wal append: %w", err)
+	}
+
 	s1New, s2New := EncodeInt64(txid)
 
 	writes := []hal.BlockWrite{
@@ -371,6 +396,10 @@ func (s *Storage) MarkDeleted(ctx context.Context, pos hal.BlockPos, txid int64)
 
 	if err := s.hal.BatchWrite(ctx, writes); err != nil {
 		return fmt.Errorf("storage: write delete marker: %w", err)
+	}
+
+	if err := s.wal.Commit(ctx, lsn); err != nil {
+		return fmt.Errorf("storage: wal commit: %w", err)
 	}
 
 	return nil

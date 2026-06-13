@@ -7,12 +7,14 @@ import (
 
 	"github.com/swapnil404/minesql/internal/hal"
 	"github.com/swapnil404/minesql/internal/hal/mock"
+	"github.com/swapnil404/minesql/internal/wal"
 )
 
 func newTestStorage(t *testing.T) *Storage {
 	t.Helper()
 	h := mock.NewStorage()
-	s := NewStorage(h)
+	w := wal.NewWAL(h)
+	s := NewStorage(h, w)
 	if err := s.LoadCatalog(context.Background()); err != nil {
 		t.Fatalf("LoadCatalog: %v", err)
 	}
@@ -113,7 +115,8 @@ func TestInsertRow(t *testing.T) {
 func TestInsertRowStripLayout(t *testing.T) {
 	ctx := context.Background()
 	h := mock.NewStorage()
-	s := NewStorage(h)
+	w := wal.NewWAL(h)
+	s := NewStorage(h, w)
 	if err := s.LoadCatalog(ctx); err != nil {
 		t.Fatalf("LoadCatalog: %v", err)
 	}

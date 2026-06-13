@@ -8,12 +8,14 @@ import (
 	"github.com/swapnil404/minesql/internal/hal/mock"
 	"github.com/swapnil404/minesql/internal/parser"
 	"github.com/swapnil404/minesql/internal/storage"
+	"github.com/swapnil404/minesql/internal/wal"
 )
 
 func newTestExecutor(t *testing.T) *Executor {
 	t.Helper()
 	h := mock.NewStorage()
-	s := storage.NewStorage(h)
+	w := wal.NewWAL(h)
+	s := storage.NewStorage(h, w)
 	if err := s.LoadCatalog(context.Background()); err != nil {
 		t.Fatalf("LoadCatalog: %v", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/swapnil404/minesql/internal/executor"
 	"github.com/swapnil404/minesql/internal/hal"
 	"github.com/swapnil404/minesql/internal/storage"
+	"github.com/swapnil404/minesql/internal/wal"
 	"github.com/swapnil404/minesql/internal/wire"
 )
 
@@ -28,7 +29,13 @@ func main() {
 	}
 	log.Printf("connected to Minecraft plugin at %s", minecraftAddr)
 
-	store := storage.NewStorage(halClient)
+	walog := wal.NewWAL(halClient)
+	if err := walog.Recover(ctx); err != nil {
+		log.Fatalf("WAL recovery failed: %v", err)
+	}
+	log.Printf("WAL recovery complete (next LSN: %d)", walog.NextLSN())
+
+	store := storage.NewStorage(halClient, walog)
 	if err := store.LoadCatalog(ctx); err != nil {
 		log.Fatalf("failed to load catalog: %v", err)
 	}

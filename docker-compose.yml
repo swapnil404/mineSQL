@@ -1,0 +1,32 @@
+services:
+  minecraft:
+    build: ./docker
+    ports:
+      - "${MINECRAFT_GAME_PORT:-25565}:25565"
+    stdin_open: true
+    tty: true
+    environment:
+      EULA: "true"
+      MINESQL_HOST: minesql
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/localhost/25576' 2>/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 15s
+
+  minesql:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.engine
+    ports:
+      - "${MINESQL_PORT:-5433}:5433"
+      - "${MINESQL_CHAT_PORT:-5456}:5456"
+    environment:
+      MINESQL_MINECRAFT_ADDR: minecraft:25576
+      MINESQL_PORT: "5433"
+      MINESQL_CHAT_PORT: "5456"
+    depends_on:
+      minecraft:
+        condition: service_healthy
+    restart: on-failure

@@ -1,0 +1,19 @@
+# Build artifacts
+/minesql
+*.exe
+
+# Docker plugin jar (built from minesql-hal repo)
+docker/minesql-hal.jar
+
+# Local environment config (copy .env.example to .env)
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

@@ -9,6 +9,8 @@ services:
     environment:
       EULA: "true"
       MINESQL_HOST: host.docker.internal
+      MC_SERVER_PORT: "25565"
+      MC_PLUGIN_PORT: "25576"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

@@ -61,7 +61,11 @@ func main() {
 
 	go func() {
 		log.Printf("mineSQL wire server listening on :%s", pgPort)
-		log.Printf("mineSQL ready. connect with: psql -h localhost -p 5432 -U minecraft -d minesql -w")
+		hostPort := os.Getenv("MINESQL_HOST_PORT")
+		if hostPort == "" {
+			hostPort = pgPort
+		}
+		log.Printf("mineSQL ready. connect with: psql -h localhost -p %s -U minecraft -d minesql -w", hostPort)
 		errCh <- pgSrv.ListenAndServe(ctx)
 	}()
 

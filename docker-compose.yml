@@ -8,6 +8,8 @@ services:
     environment:
       EULA: "true"
       MINESQL_HOST: minesql
+      MC_SERVER_PORT: "25565"
+      MC_PLUGIN_PORT: "25576"
     volumes:
       - minecraft_world:/minecraft/world
       - minecraft_logs:/minecraft/logs
@@ -32,6 +34,7 @@ services:
       MINESQL_MINECRAFT_ADDR: minecraft:25576
       MINESQL_PORT: "5433"
       MINESQL_CHAT_PORT: "5456"
+      MINESQL_HOST_PORT: "${MINESQL_PORT:-5432}"
     networks:
       - minesql-net
     depends_on:

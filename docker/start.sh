@@ -53,6 +53,9 @@ send_cmd "gamerule announceAdvancements false"
 send_cmd "gamerule sendCommandFeedback false"
 
 echo "Gamerules set. mineSQL storage world is ready."
+echo ""
+echo "  Minecraft server   : localhost:${MC_SERVER_PORT:-25565}"
+echo "  Plugin TCP (HAL)   : localhost:${MC_PLUGIN_PORT:-25576}"
 
 exec 3>&-
 wait $MC_PID

@@ -34,8 +34,6 @@ minesql=# SELECT * FROM players WHERE kills > 10;
 2 rows returned
 ```
 
-Somewhere in the Minecraft world, a strip of banner blocks standing on grass at Z=10000 encodes that row as heraldic pattern layers. A sign beside them reads "swapnil". Walk west from spawn and a row of lecterns holds the open transaction log.
-
 ---
 
 ## Getting Started
@@ -67,8 +65,6 @@ psql -h localhost -p 5433 -U minecraft -d minesql
 /sql SELECT * FROM players
 ```
 
-The `/sql` command sends queries to the chat server on port 5456 and renders results as colored chat components in-game.
-
 ### Dev Mode
 
 ```bash
@@ -91,38 +87,46 @@ Any tool that speaks Postgres works out of the box. `psql`, database drivers in 
 
 The world is the database. Spawn is the origin.
 
-**Walk east** — you are walking through your tables. Each table occupies a Z region on the surface. Every row is a horizontal strip of standing banners and signs. Banner blocks encode INT, BIGINT, and BOOLEAN columns as heraldic pattern layers (6 bytes per banner, pattern type = high nibble, dye color = low nibble). Signs hold TEXT columns (64 chars per sign). Each row strip stands on the grass at Y=64, visible from above.
+**Walk east** — you are walking through your tables. Each table occupies a Z region on the surface starting at Z=0. Every row is a horizontal strip of standing banners and signs. Banner blocks encode INT, BIGINT, and BOOLEAN columns as heraldic pattern layers (6 bytes per banner, pattern type = high nibble, dye color = low nibble). Signs hold TEXT columns (64 chars per sign). Each row strip stands on the grass at Y=64, visible from above.
 
 **Walk west** — you are walking through the transaction log. Each WAL entry is a lectern block holding a written book. Open any lectern and read the raw transaction: LSN, TXID, STATUS, operation, target coordinates, new value. The further west you go, the older the transaction.
 
-**Dig down** — you are reading internal metadata. The catalog (table definitions) and control block (max transaction ID) live underground, out of sight.
+**Dig down** — you are reading internal metadata. The catalog (table definitions) and control block (max transaction ID) live underground at Y=10, out of sight.
 
 A sequential scan flies through the Z region of a table, reads the banner patterns and sign text from each row strip, deserializes the row, applies MVCC visibility and WHERE filters, and streams results back to the client. A write appends a new strip at the next Z position and flushes a WAL lectern entry before the data blocks are touched.
 
-Dead rows from deletes and updates are never immediately removed — their xmax banner is updated. A background vacuum goroutine periodically replaces dead strips with air.
+Dead rows from deletes and updates are never removed — their xmax banner is updated to mark them invisible to new transactions.
 
 ---
 
 ## Architecture
 
 ```
-psql / any Postgres client
-         │  Postgres wire protocol (port 5433)
+psql / any Postgres client         Minecraft chat (/sql)
+         │  port 5433                    │  port 5456
+         ▼                               ▼
+┌─────────────────────────────────────────────┐
+│  Wire Protocol         Chat Server          │
+│  (pgproto3)            (JSON line-delimited)│
+├─────────────────────────────────────────────┤
+│  SQL Parser (pg_query)                      │
+├─────────────────────────────────────────────┤
+│  Executor (planning, execution, MVCC)       │
+├─────────────────────────────────────────────┤
+│  Storage (banner+sign encoding, catalog)    │
+├─────────────────────────────────────────────┤
+│  WAL (write-ahead log, crash recovery)      │
+├─────────────────────────────────────────────┤
+│  HAL — TCP client to Paper plugin           │
+└─────────────────────────────────────────────┘
+         │  custom binary TCP (port 25576)
          ▼
-┌─────────────────────────────────┐
-│  Wire Protocol → SQL Parser     │
-│  Query Planner → Executor       │
-│  Storage Layer → WAL → MVCC     │
-│  HAL (Go)                       │
-└─────────────────────────────────┘
-        │  custom binary TCP protocol (port 25576)
-        ▼
 ┌─────────────────────────────────┐
 │  minesql-plugin (Paper/Java)    │
 │  thin I/O bridge — READ/WRITE   │
 └─────────────────────────────────┘
-        │
-        ▼
+         │
+         ▼
   Minecraft World (superflat, structures off)
 ```
 
@@ -140,7 +144,7 @@ WAL lecterns  │         user table data
 (transaction  │         (banner+sign strips
  log books)   │          standing on grass)
               │
-         underground
+         underground (Y=10)
          catalog + control block
 ```
 

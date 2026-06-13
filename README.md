@@ -6,7 +6,7 @@ Connect with `psql` or chat `/sql` in-game. Run real SQL. Watch your data persis
 
 ```
 # From any Postgres client:
-$ psql -h localhost -p 5433 -U minecraft -d minesql -w
+$ psql -h localhost -p 5432 -U minecraft -d minesql -w
 psql (15.0)
 Type "help" for help.
 
@@ -56,7 +56,7 @@ Wait for Minecraft to finish loading (~30s), then connect:
 
 ```bash
 # Via psql (any Postgres client)
-psql -h localhost -p 5433 -U minecraft -d minesql -w
+psql -h localhost -p 5432 -U minecraft -d minesql -w
 ```
 
 ```bash

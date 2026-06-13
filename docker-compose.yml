@@ -26,7 +26,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.engine
     ports:
-      - "${MINESQL_PORT:-5433}:5433"
+      - "${MINESQL_PORT:-5432}:5433"
       - "${MINESQL_CHAT_PORT:-5456}:5456"
     environment:
       MINESQL_MINECRAFT_ADDR: minecraft:25576

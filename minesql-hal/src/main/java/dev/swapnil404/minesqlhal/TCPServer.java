@@ -4,6 +4,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -88,11 +89,11 @@ public class TCPServer {
                 handlerThread.start();
             } catch (SocketException e) {
                 if (running) {
-                    logger.warning("Server socket exception: " + e.getMessage());
+                    logger.warning("Server socket exception: " + e.toString());
                 }
             } catch (IOException e) {
                 if (running) {
-                    logger.warning("Accept error: " + e.getMessage());
+                    logger.warning("Accept error: " + e.toString());
                 }
             }
         }
@@ -117,9 +118,11 @@ public class TCPServer {
             }
         } catch (SocketException e) {
             // connection closed (normal)
+        } catch (EOFException e) {
+            // clean disconnect — no data sent (health check probe, etc.)
         } catch (IOException e) {
             if (running) {
-                logger.warning("Client handler error: " + e.getMessage());
+                logger.warning("Client handler error: " + e.toString());
             }
         } finally {
             clientSockets.remove(socket);

@@ -74,6 +74,8 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			s.handleQuery(ctx, backend, m.String)
 		case *pgproto3.Terminate:
 			return
+		case *pgproto3.PasswordMessage:
+			continue
 		default:
 			s.sendError(backend, "0A000", "not implemented")
 			backend.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})

@@ -14,6 +14,8 @@ services:
     volumes:
       - minecraft_world:/minecraft/world
       - minecraft_logs:/minecraft/logs
+    networks:
+      - minesql-net
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/localhost/25576' 2>/dev/null"]
@@ -25,3 +27,6 @@ services:
 volumes:
   minecraft_world:
   minecraft_logs:
+
+networks:
+  minesql-net:

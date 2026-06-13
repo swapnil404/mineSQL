@@ -11,6 +11,8 @@ services:
     volumes:
       - minecraft_world:/minecraft/world
       - minecraft_logs:/minecraft/logs
+    networks:
+      - minesql-net
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/localhost/25576' 2>/dev/null"]
@@ -30,6 +32,8 @@ services:
       MINESQL_MINECRAFT_ADDR: minecraft:25576
       MINESQL_PORT: "5433"
       MINESQL_CHAT_PORT: "5456"
+    networks:
+      - minesql-net
     depends_on:
       minecraft:
         condition: service_healthy
@@ -38,3 +42,6 @@ services:
 volumes:
   minecraft_world:
   minecraft_logs:
+
+networks:
+  minesql-net:

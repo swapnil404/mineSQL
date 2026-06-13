@@ -2,8 +2,9 @@
 /minesql
 *.exe
 
-# Docker plugin jar (built from minesql-hal repo)
-docker/minesql-hal.jar
+# Docker plugin build artifacts
+minesql-hal/target/
+minesql-hal/dependency-reduced-pom.xml
 
 # Local environment config (copy .env.example to .env)
 .env

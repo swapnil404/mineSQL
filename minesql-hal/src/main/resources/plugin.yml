@@ -1,0 +1,17 @@
+name: mineSQL-HAL
+version: "0.1.0"
+main: dev.swapnil404.minesqlhal.Main
+api-version: "1.21"
+description: A Paper plugin that acts as the hardware abstraction layer (HAL) for mineSQL, bridging the engine to a live Minecraft server over a custom binary TCP protocol
+
+commands:
+  sql:
+    description: Execute a SQL query via the mineSQL engine
+    usage: /sql <query>
+    permission: minesqlhal.sql
+    permission-message: You do not have permission to use this command.
+
+permissions:
+  minesqlhal.sql:
+    description: Allows using the /sql command
+    default: true

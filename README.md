@@ -38,6 +38,47 @@ Somewhere in the Minecraft world, a strip of banner blocks standing on grass at 
 
 ---
 
+## Getting Started
+
+### Prerequisites
+
+- Go 1.22+
+- Docker + Docker Compose
+- `psql` (or any Postgres client)
+
+### Run
+
+```bash
+git clone https://github.com/swapnil404/minesql
+cd minesql
+docker compose up
+```
+
+Wait for Minecraft to finish loading (~30s), then connect:
+
+```bash
+# Via psql (any Postgres client)
+psql -h localhost -p 5433 -U minecraft -d minesql
+```
+
+```bash
+# Or via in-game chat (join the Minecraft server on localhost:25565)
+# Type in chat:
+/sql SELECT * FROM players
+```
+
+The `/sql` command sends queries to the chat server on port 5456 and renders results as colored chat components in-game.
+
+### Dev Mode
+
+```bash
+# Minecraft in Docker, engine runs locally
+docker compose -f docker-compose.dev.yml up
+go run ./cmd/minesql
+```
+
+---
+
 ## What It Is
 
 mineSQL is a Postgres-wire-compatible relational database engine written in Go. It implements real database internals — WAL, MVCC, a query executor, and a SQL parser — but instead of writing to disk, it stores every row as a strip of banner blocks and signs standing on grass in a live Minecraft world.
@@ -101,47 +142,6 @@ WAL lecterns  │         user table data
               │
          underground
          catalog + control block
-```
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- Go 1.22+
-- Docker + Docker Compose
-- `psql` (or any Postgres client)
-
-### Run
-
-```bash
-git clone https://github.com/swapnil404/minesql
-cd minesql
-docker compose up
-```
-
-Wait for Minecraft to finish loading (~30s), then connect:
-
-```bash
-# Via psql (any Postgres client)
-psql -h localhost -p 5433 -U minecraft -d minesql
-```
-
-```bash
-# Or via in-game chat (join the Minecraft server on localhost:25565)
-# Type in chat:
-/sql SELECT * FROM players
-```
-
-The `/sql` command sends queries to the chat server on port 5456 and renders results as colored chat components in-game.
-
-### Dev Mode
-
-```bash
-# Minecraft in Docker, engine runs locally
-docker compose -f docker-compose.dev.yml up
-go run ./cmd/minesql
 ```
 
 ## License

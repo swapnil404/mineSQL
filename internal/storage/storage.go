@@ -2,10 +2,8 @@ package storage
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 
@@ -294,9 +292,6 @@ func (s *Storage) SeqScan(ctx context.Context, table *TableMeta, txid int64) (<-
 			return
 		}
 
-		log.Printf("[SeqScan DEBUG] table=%q Y=%d Z=[%d..%d] stripWidth=%d rowCount=%d",
-			table.Name, table.YLevel, table.ZStart, table.ZStart+rowCount-1, stripW, rowCount)
-
 		for ri := 0; ri < rowCount; ri++ {
 			select {
 			case <-ctx.Done():
@@ -323,22 +318,6 @@ func (s *Storage) SeqScan(ctx context.Context, table *TableMeta, txid int64) (<-
 				ch <- ScanResult{Err: fmt.Errorf("storage: batch read row Z=%d: %w", z, err)}
 				return
 			}
-
-			nonEmpty := 0
-			var firstNonEmpty []byte
-			for _, d := range data {
-				if len(d) > 0 {
-					if nonEmpty == 0 {
-						firstNonEmpty = d
-					}
-					nonEmpty++
-				}
-			}
-			if len(firstNonEmpty) > 24 {
-				firstNonEmpty = firstNonEmpty[:24]
-			}
-			log.Printf("[SeqScan DEBUG] Z=%d stripPositions=%d responses=%d nonEmpty=%d firstHex=%q",
-				z, len(positions), len(data), nonEmpty, hex.EncodeToString(firstNonEmpty))
 
 			if isEmptyStrip(data) {
 				continue

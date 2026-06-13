@@ -8,6 +8,10 @@ services:
     environment:
       EULA: "true"
       MINESQL_HOST: minesql
+    volumes:
+      - minecraft_world:/minecraft/world
+      - minecraft_logs:/minecraft/logs
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/localhost/25576' 2>/dev/null"]
       interval: 5s
@@ -30,3 +34,7 @@ services:
       minecraft:
         condition: service_healthy
     restart: on-failure
+
+volumes:
+  minecraft_world:
+  minecraft_logs:

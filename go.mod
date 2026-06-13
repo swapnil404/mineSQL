@@ -1,6 +1,6 @@
 module github.com/swapnil404/minesql
 
-go 1.26.3
+go 1.22
 
 require (
 	github.com/jackc/pgproto3/v2 v2.3.3

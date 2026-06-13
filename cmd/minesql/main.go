@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/swapnil404/minesql/internal/executor"
 	"github.com/swapnil404/minesql/internal/hal"
@@ -71,8 +72,24 @@ func main() {
 	select {
 	case err := <-errCh:
 		if err != nil {
-			log.Fatalf("server error: %v", err)
+			log.Printf("server error: %v", err)
 		}
+		cancel()
 	case <-ctx.Done():
+	}
+
+	log.Printf("shutting down...")
+
+	done := make(chan struct{})
+	go func() {
+		<-errCh
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Printf("all servers stopped")
+	case <-time.After(30 * time.Second):
+		log.Printf("shutdown timed out waiting for servers")
 	}
 }

@@ -11,9 +11,17 @@ services:
       MINESQL_HOST: host.docker.internal
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - minecraft_world:/minecraft/world
+      - minecraft_logs:/minecraft/logs
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/localhost/25576' 2>/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 40
       start_period: 15s
+
+volumes:
+  minecraft_world:
+  minecraft_logs:

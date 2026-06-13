@@ -1,11 +1,11 @@
 package wire
 
 import (
+	"bufio"
 	"context"
-	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 
@@ -14,8 +14,10 @@ import (
 )
 
 type chatResponse struct {
-	Columns []string   `json:"columns"`
-	Rows    [][]string `json:"rows"`
+	Columns   []string   `json:"columns"`
+	Rows      [][]string `json:"rows"`
+	RowCount  int        `json:"row_count"`
+	Truncated bool       `json:"truncated"`
 }
 
 type ChatServer struct {
@@ -61,24 +63,19 @@ func (s *ChatServer) ListenAndServe(ctx context.Context) error {
 func (s *ChatServer) handleConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
-	var length uint32
-	if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
-		log.Printf("chat read length: %v", err)
-		return
-	}
-
-	if length > 10*1024*1024 {
-		s.writeError(conn, "query too large")
-		return
-	}
-
-	query := make([]byte, length)
-	if _, err := io.ReadFull(conn, query); err != nil {
+	reader := bufio.NewReader(conn)
+	query, err := reader.ReadString('\n')
+	if err != nil {
 		log.Printf("chat read query: %v", err)
 		return
 	}
 
-	stmt, err := parser.Parse(string(query))
+	if len(query) > 10*1024*1024 {
+		s.writeError(conn, "query too large")
+		return
+	}
+
+	stmt, err := parser.Parse(query)
 	if err != nil {
 		s.writeError(conn, "syntax error: "+err.Error())
 		return
@@ -91,8 +88,10 @@ func (s *ChatServer) handleConn(ctx context.Context, conn net.Conn) {
 	}
 
 	resp := chatResponse{
-		Columns: result.Columns,
-		Rows:    rowsToStrings(result.Rows),
+		Columns:   result.Columns,
+		Rows:      rowsToStrings(result.Rows),
+		RowCount:  len(result.Rows),
+		Truncated: false,
 	}
 	if resp.Columns == nil {
 		resp.Columns = []string{}
@@ -125,24 +124,20 @@ func rowsToStrings(rows [][]interface{}) [][]string {
 }
 
 func (s *ChatServer) writeSuccess(conn net.Conn, data []byte) {
-	conn.Write([]byte{0x00})
-	binary.Write(conn, binary.BigEndian, uint32(len(data)))
 	conn.Write(data)
+	conn.Write([]byte("\n"))
 }
 
 func (s *ChatServer) writeError(conn net.Conn, message string) {
-	msg := []byte(message)
-	conn.Write([]byte{0xFF})
-	binary.Write(conn, binary.BigEndian, uint32(len(msg)))
-	conn.Write(msg)
+	resp := map[string]string{"error": message}
+	data, _ := json.Marshal(resp)
+	conn.Write(data)
+	conn.Write([]byte("\n"))
 }
 
 func isClosed(err error) bool {
 	if err == nil {
 		return false
 	}
-	if opErr, ok := err.(*net.OpError); ok {
-		return opErr.Err.Error() == "use of closed network connection"
-	}
-	return err.Error() == "use of closed network connection"
+	return errors.Is(err, net.ErrClosed)
 }

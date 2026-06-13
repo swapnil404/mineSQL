@@ -2,10 +2,11 @@
 
 > A relational database engine that uses a Minecraft world as its physical storage backend.
 
-Connect with `psql`. Run real SQL. Watch your data persist as blocks in the ground.
+Connect with `psql` or chat `/sql` in-game. Run real SQL. Watch your data persist as blocks in the ground.
 
 ```
-$ psql -h localhost -p 5432 -U minecraft -d minesql
+# From any Postgres client:
+$ psql -h localhost -p 5433 -U minecraft -d minesql
 psql (15.0)
 Type "help" for help.
 
@@ -20,6 +21,17 @@ minesql=# SELECT * FROM players WHERE kills > 10;
 ---------+-------
  swapnil |    42
 (1 row)
+```
+
+```
+# Or from inside Minecraft chat:
+/sql SELECT * FROM players WHERE kills > 10
+
+  name           | kills
+-----------------------------
+  swapnil        | 42
+
+2 rows returned
 ```
 
 Somewhere in the Minecraft world, a strip of banner blocks standing on grass at Z=10000 encodes that row as heraldic pattern layers. A sign beside them reads "swapnil". Walk west from spawn and a row of lecterns holds the open transaction log.
@@ -54,8 +66,8 @@ Dead rows from deletes and updates are never immediately removed — their xmax 
 
 ```
 psql / any Postgres client
-        │  Postgres wire protocol (port 5432)
-        ▼
+         │  Postgres wire protocol (port 5433)
+         ▼
 ┌─────────────────────────────────┐
 │  Wire Protocol → SQL Parser     │
 │  Query Planner → Executor       │
@@ -99,7 +111,7 @@ WAL lecterns  │         user table data
 
 - Go 1.22+
 - Docker + Docker Compose
-- `psql`
+- `psql` (or any Postgres client)
 
 ### Run
 
@@ -112,8 +124,17 @@ docker compose up
 Wait for Minecraft to finish loading (~30s), then connect:
 
 ```bash
-psql -h localhost -p 5432 -U minecraft -d minesql
+# Via psql (any Postgres client)
+psql -h localhost -p 5433 -U minecraft -d minesql
 ```
+
+```bash
+# Or via in-game chat (join the Minecraft server on localhost:25565)
+# Type in chat:
+/sql SELECT * FROM players
+```
+
+The `/sql` command sends queries to the chat server on port 5456 and renders results as colored chat components in-game.
 
 ### Dev Mode
 

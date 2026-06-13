@@ -10,8 +10,14 @@ fi
 
 echo "Starting mineSQL Minecraft server with ${MEM} heap..."
 
-java -Xms"${MEM}" -Xmx"${MEM}" -XX:+UseG1GC -jar paper.jar nogui &
+FIFO=/tmp/mcstdin
+rm -f "$FIFO"
+mkfifo "$FIFO"
+
+java -Xms"${MEM}" -Xmx"${MEM}" -XX:+UseG1GC -jar paper.jar nogui < "$FIFO" &
 MC_PID=$!
+
+exec 3>"$FIFO"
 
 echo "Waiting for server to be ready..."
 READY=0
@@ -25,6 +31,7 @@ done
 
 if [ "$READY" -eq 0 ]; then
     echo "ERROR: Server failed to start within 4 minutes"
+    exec 3>&-
     exit 1
 fi
 
@@ -32,10 +39,8 @@ echo "Server ready. Setting gamerules..."
 sleep 3
 
 send_cmd() {
-    if [ -e /proc/$MC_PID/fd/0 ]; then
-        echo "$1" > /proc/$MC_PID/fd/0 2>/dev/null || true
-    fi
-    sleep 1
+    echo "$1" >&3
+    sleep 0.5
 }
 
 send_cmd "gamerule doWeatherCycle false"
@@ -49,4 +54,5 @@ send_cmd "gamerule sendCommandFeedback false"
 
 echo "Gamerules set. mineSQL storage world is ready."
 
+exec 3>&-
 wait $MC_PID
